@@ -36,6 +36,8 @@ except Exception as _e:
         widget    = None
         is_ortho  = False
         def load(self, *a, **kw): return {}
+        def load_result(self, *a, **kw): return {}
+        def clear_result(self, *a): pass
         def set_mode(self, *a): pass
         def set_bgcolor(self, *a): pass
         def update_viz(self, *a, **kw): pass
@@ -81,10 +83,11 @@ def _build_qss(t: dict) -> str:
          font-family: -apple-system, 'Helvetica Neue', 'Segoe UI', sans-serif; }}
     QPushButton {{
         background: {t['panel']}; border: 1px solid {t['border']};
-        color: {t['text']}; padding: 5px 10px; border-radius: 4px;
-        font-size: 12px;
+        color: {t['text']}; padding: 6px 10px; border-radius: 4px;
+        font-size: 13px;
     }}
     QPushButton:hover {{ background: {t['border']}; }}
+    QPushButton:pressed {{ background: {t['border']}; border-color: {t['accent']}; }}
     QPushButton[role="accent"] {{
         background: transparent; border-color: {t['accent']}; color: {t['accent']};
     }}
@@ -97,14 +100,19 @@ def _build_qss(t: dict) -> str:
         background: {t['success']}22; border-color: {t['success']};
         color: {t['success']}; font-size: 13px; font-weight: bold;
     }}
+    QPushButton[role="done"] {{
+        background: {t['success']}18; border: 2px solid {t['success']};
+        color: {t['success']}; font-size: 13px; font-weight: bold;
+    }}
+    QPushButton[role="done"]:hover {{ background: {t['success']}30; }}
     QPushButton[role="active"] {{
-        background: {t['accent']}33; border-color: {t['accent']};
+        background: {t['accent']}33; border: 2px solid {t['accent']};
         color: {t['accent']}; font-weight: bold;
     }}
     QLineEdit {{
         background: {t['entry']}; border: 1px solid {t['border']};
         color: {t['text']}; padding: 4px 8px; border-radius: 3px;
-        font-size: 12px;
+        font-size: 13px;
     }}
     QLineEdit:focus {{ border-color: {t['accent']}; }}
     QLabel {{ background: transparent; }}
@@ -152,18 +160,19 @@ class _NumEntry(QWidget):
         lay.setSpacing(4)
 
         lbl = QLabel(label)
-        lbl.setFixedWidth(84)
-        lbl.setStyleSheet("font-size: 11px;")
+        lbl.setFixedWidth(90)
+        lbl.setStyleSheet("font-size: 13px;")
         lay.addWidget(lbl)
 
         self._edit = QLineEdit(str(default))
         self._edit.setValidator(QDoubleValidator(lo, hi, 1))
-        self._edit.setFixedWidth(68)
+        self._edit.setFixedWidth(72)
+        self._edit.setFixedHeight(28)
         self._edit.textChanged.connect(self._emit)
         lay.addWidget(self._edit)
 
         u = QLabel(unit)
-        u.setStyleSheet("font-size: 10px; color: #4a5568;")
+        u.setStyleSheet("font-size: 12px; color: #4a5568;")
         lay.addWidget(u)
         lay.addStretch()
 
@@ -230,6 +239,11 @@ class MainWindow(QMainWindow):
 
         self._renderer = Renderer3D()
         self._active_pick_btn: QPushButton | None = None
+        self._front_axle_y: float | None = None   # Y (height) picked for front axle
+        self._rear_axle_y:  float | None = None   # Y (height) picked for rear axle
+        self._result_front_x: float | None = None  # スケール後のフロント軸X（結果表示用）
+        self._result_rear_x:  float | None = None  # スケール後のリア軸X（結果表示用）
+        self._result_cut_z:   float | None = None  # スケール後のCut Z（結果表示用）
 
         os.makedirs(PREVIEW_DIR, exist_ok=True)
         os.makedirs(OUTPUTS_DIR, exist_ok=True)
@@ -448,10 +462,11 @@ class MainWindow(QMainWindow):
             self._preset_btn("→X",     0.0,  90.0, 0.0),
         )
 
-        apply_btn = QPushButton("✓  Apply Rotation")
-        apply_btn.setProperty("role", "accent")
-        apply_btn.clicked.connect(self._apply_rotation)
-        s0.add(apply_btn)
+        self._apply_rot_btn = QPushButton("✓  Apply Rotation")
+        self._apply_rot_btn.setProperty("role", "accent")
+        self._apply_rot_btn.setFixedHeight(36)
+        self._apply_rot_btn.clicked.connect(self._apply_rotation)
+        s0.add(self._apply_rot_btn)
 
         lay.addWidget(s0)
 
@@ -462,10 +477,11 @@ class MainWindow(QMainWindow):
         self._file_lbl.setStyleSheet("font-size: 10px; color: #4a5568;")
         s1.add(self._file_lbl)
 
-        open_btn = QPushButton("Open Model File…")
-        open_btn.setProperty("role", "accent")
-        open_btn.clicked.connect(self._open_file)
-        s1.add(open_btn)
+        self._open_btn = QPushButton("Open Model File…")
+        self._open_btn.setProperty("role", "accent")
+        self._open_btn.setFixedHeight(36)
+        self._open_btn.clicked.connect(self._open_file)
+        s1.add(self._open_btn)
 
         self._size_lbl = QLabel("")
         self._size_lbl.setStyleSheet("font-size: 10px; color: #4a5568;")
@@ -487,24 +503,32 @@ class MainWindow(QMainWindow):
         # ── 02 Tires ──────────────────────────────────────────────────────
         s2 = _Section("02  TIRES")
 
-        self._e_front_x  = _NumEntry("Front X",    85.0)
-        self._e_rear_x   = _NumEntry("Rear X",     -85.0)
-        self._e_offset_y = _NumEntry("Y Offset",    45.0)
-        self._e_front_d  = _NumEntry("Front Diam",  52.0)
-        self._e_front_w  = _NumEntry("Front Width", 26.0)
-        self._e_rear_d   = _NumEntry("Rear Diam",   52.0)
-        self._e_rear_w   = _NumEntry("Rear Width",  26.0)
+        self._e_front_x    = _NumEntry("Front X",     85.0)
+        self._e_rear_x     = _NumEntry("Rear X",      -85.0)
+        self._e_offset_y   = _NumEntry("Y Offset",     45.0)
+        self._e_front_d    = _NumEntry("カット径 前",  52.0)
+        self._e_front_w    = _NumEntry("Front Width",  26.0)
+        self._e_rear_d     = _NumEntry("カット径 後",  52.0)
+        self._e_rear_w     = _NumEntry("Rear Width",   26.0)
+        self._e_rc_front_d = _NumEntry("RC径 前",      52.0)
+        self._e_rc_rear_d  = _NumEntry("RC径 後",      52.0)
 
         for e in (self._e_front_x, self._e_rear_x, self._e_offset_y,
                   self._e_front_d, self._e_front_w,
-                  self._e_rear_d,  self._e_rear_w):
+                  self._e_rear_d,  self._e_rear_w,
+                  self._e_rc_front_d, self._e_rc_rear_d):
             s2.add(e)
             e.changed.connect(self._on_param_change)
 
-        s2.addRow(
-            self._pick_btn("▶ FRONT X", "front_x"),
-            self._pick_btn("▶ REAR X",  "rear_x"),
-        )
+        # Separator hint
+        _hint2 = QLabel("カット径: Blender Boolean用  /  RC径: 3D表示用")
+        _hint2.setStyleSheet("font-size: 10px; color: #4a5568;")
+        _hint2.setWordWrap(True)
+        s2.add(_hint2)
+
+        self._btn_front_x = self._pick_btn("▶ FRONT X", "front_x")
+        self._btn_rear_x  = self._pick_btn("▶ REAR X",  "rear_x")
+        s2.addRow(self._btn_front_x, self._btn_rear_x)
 
         # Current wheelbase readout
         self._wb_lbl = QLabel("現在のWB: — mm")
@@ -530,17 +554,23 @@ class MainWindow(QMainWindow):
             s3.add(e)
             e.changed.connect(self._on_param_change)
 
-        s3.add(self._pick_btn("▶ PICK CUT Z", "cut_z"))
+        self._btn_cut_z = self._pick_btn("▶ PICK CUT Z", "cut_z")
+        s3.add(self._btn_cut_z)
         lay.addWidget(s3)
 
         # ── 04 Execute ────────────────────────────────────────────────────
         s4 = _Section("04  EXECUTE")
 
-        self._run_btn = QPushButton("Run Blender Process")
+        self._run_btn = QPushButton("▶  Blender で処理を実行")
         self._run_btn.setProperty("role", "success")
-        self._run_btn.setFixedHeight(40)
+        self._run_btn.setFixedHeight(48)
         self._run_btn.clicked.connect(self._run_process)
         s4.add(self._run_btn)
+
+        self._test_tire_btn = QPushButton("🔧  タイヤカットのみ（テスト）")
+        self._test_tire_btn.setProperty("role", "accent")
+        self._test_tire_btn.clicked.connect(lambda: self._run_process(mode="tire_cut_only"))
+        s4.add(self._test_tire_btn)
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)
@@ -548,9 +578,15 @@ class MainWindow(QMainWindow):
         s4.add(self._progress)
 
         self._status_lbl = QLabel("")
-        self._status_lbl.setStyleSheet("font-size: 10px; color: #4a5568;")
+        self._status_lbl.setStyleSheet("font-size: 12px;")
         self._status_lbl.setWordWrap(True)
         s4.add(self._status_lbl)
+
+        self._clear_result_btn = QPushButton("✕  結果オーバーレイをクリア")
+        self._clear_result_btn.setProperty("role", "accent2")
+        self._clear_result_btn.setVisible(False)
+        self._clear_result_btn.clicked.connect(self._clear_result_overlay)
+        s4.add(self._clear_result_btn)
 
         lay.addWidget(s4)
 
@@ -662,6 +698,14 @@ class MainWindow(QMainWindow):
             self._e_rot_z.get(),
         )
         self._update_viz()
+        self._mark_btn_done(self._apply_rot_btn, "✓  回転適用済み")
+        # Reset back to neutral after 2 seconds so it can be clicked again
+        QTimer.singleShot(2000, lambda: (
+            self._apply_rot_btn.setText("✓  Apply Rotation"),
+            self._apply_rot_btn.setProperty("role", "accent"),
+            self._apply_rot_btn.style().unpolish(self._apply_rot_btn),
+            self._apply_rot_btn.style().polish(self._apply_rot_btn),
+        ))
 
     def _toggle_theme(self):
         global _CUR_THEME
@@ -691,7 +735,17 @@ class MainWindow(QMainWindow):
             return
         self._model_path = path
         self._file_lbl.setText(os.path.basename(path))
+        self._open_btn.setText("読み込み中…")
+        self._open_btn.setProperty("role", "")
+        self._open_btn.style().unpolish(self._open_btn)
+        self._open_btn.style().polish(self._open_btn)
 
+        self._clear_result_btn.setVisible(False)
+        self._front_axle_y   = None
+        self._rear_axle_y    = None
+        self._result_front_x = None
+        self._result_rear_x  = None
+        self._result_cut_z   = None
         if self._renderer.available:
             info = self._renderer.load(path)
             if info:
@@ -701,8 +755,15 @@ class MainWindow(QMainWindow):
                     f"Z:{info['Z_mm']:.0f} mm  ({info['faces']:,} faces)"
                 )
                 self._update_viz()
+                self._mark_btn_done(self._open_btn, "✓  モデル読み込み完了")
+            else:
+                self._open_btn.setText("Open Model File…")
+                self._open_btn.setProperty("role", "accent")
+                self._open_btn.style().unpolish(self._open_btn)
+                self._open_btn.style().polish(self._open_btn)
         elif HAS_TRIMESH:
             self._load_size_only(path)
+            self._mark_btn_done(self._open_btn, "✓  モデル読み込み完了")
 
     def _load_size_only(self, path: str):
         try:
@@ -760,17 +821,32 @@ class MainWindow(QMainWindow):
             return
         try:
             self._renderer.update_viz(
-                front_x  = self._e_front_x.get(),
-                rear_x   = self._e_rear_x.get(),
-                offset_y = self._e_offset_y.get(),
-                front_r  = self._e_front_d.get() / 2.0,
-                rear_r   = self._e_rear_d.get()  / 2.0,
-                cut_z    = self._e_cut_z.get(),
-                front_w  = self._e_front_w.get(),
-                rear_w   = self._e_rear_w.get(),
+                front_x    = self._e_front_x.get(),
+                rear_x     = self._e_rear_x.get(),
+                offset_y   = self._e_offset_y.get(),
+                front_r    = self._e_rc_front_d.get() / 2.0,
+                rear_r     = self._e_rc_rear_d.get()  / 2.0,
+                cut_z      = self._e_cut_z.get(),
+                front_cut_r = self._e_front_d.get() / 2.0,
+                rear_cut_r  = self._e_rear_d.get()  / 2.0,
+                front_cy   = self._front_axle_y,
+                rear_cy    = self._rear_axle_y,
+                front_w    = self._e_front_w.get(),
+                rear_w     = self._e_rear_w.get(),
+                result_front_x = self._result_front_x,
+                result_rear_x  = self._result_rear_x,
+                cut_z_result   = self._result_cut_z,
             )
         except Exception as e:
             print(f"[viz] {e}")
+
+    def _clear_result_overlay(self):
+        self._renderer.clear_result()
+        self._clear_result_btn.setVisible(False)
+        self._result_front_x = None
+        self._result_rear_x  = None
+        self._result_cut_z   = None
+        self._update_viz()
 
     def _update_wb_label(self):
         wb = abs(self._e_front_x.get() - self._e_rear_x.get())
@@ -778,12 +854,28 @@ class MainWindow(QMainWindow):
 
     # ── 3D picking ─────────────────────────────────────────────────────────
 
-    def _finish_pick(self):
-        """Reset pick button highlight and canvas cursor."""
+    def _mark_btn_done(self, btn: "QPushButton", text: str):
+        """Change a button to the 'done' (green) state."""
+        if btn is None:
+            return
+        btn.setText(text)
+        btn.setProperty("role", "done")
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+
+    def _finish_pick(self, done_text: str = ""):
+        """
+        End pick mode.
+        done_text: if provided, mark active button as done (green) with this label.
+                   If empty, reset button back to accent (cancelled / no value).
+        """
         if self._active_pick_btn is not None:
-            self._active_pick_btn.setProperty("role", "accent")
-            self._active_pick_btn.style().unpolish(self._active_pick_btn)
-            self._active_pick_btn.style().polish(self._active_pick_btn)
+            if done_text:
+                self._mark_btn_done(self._active_pick_btn, done_text)
+            else:
+                self._active_pick_btn.setProperty("role", "accent")
+                self._active_pick_btn.style().unpolish(self._active_pick_btn)
+                self._active_pick_btn.style().polish(self._active_pick_btn)
             self._active_pick_btn = None
         rw = self._renderer.widget
         if rw is not None:
@@ -800,13 +892,21 @@ class MainWindow(QMainWindow):
             "cut_z":   "ボディ底面の高さをクリック",
         }.get(axis, f"{axis} をクリック")
 
-        # Highlight active pick button
+        # Deactivate previous pick button (restore to accent, not done)
         if self._active_pick_btn is not None:
             self._active_pick_btn.setProperty("role", "accent")
             self._active_pick_btn.style().unpolish(self._active_pick_btn)
             self._active_pick_btn.style().polish(self._active_pick_btn)
+
+        # Activate new pick button — reset text and highlight
         self._active_pick_btn = btn
+        _orig_labels = {
+            "front_x": "▶  FRONT X",
+            "rear_x":  "▶  REAR X",
+            "cut_z":   "▶  PICK CUT Z",
+        }
         if btn is not None:
+            btn.setText(_orig_labels.get(axis, btn.text()))
             btn.setProperty("role", "active")
             btn.style().unpolish(btn)
             btn.style().polish(btn)
@@ -818,15 +918,24 @@ class MainWindow(QMainWindow):
 
         def _cb(x, y, _z):
             if axis == "front_x":
-                self._e_front_x.set(round(x, 1))
+                val = round(x, 1)
+                self._e_front_x.set(val)
+                self._front_axle_y = round(y, 1)
+                self._finish_pick(done_text=f"✓  FRONT X  {val:.1f}mm")
             elif axis == "rear_x":
-                self._e_rear_x.set(round(x, 1))
+                val = round(x, 1)
+                self._e_rear_x.set(val)
+                self._rear_axle_y = round(y, 1)
+                self._finish_pick(done_text=f"✓  REAR X  {val:.1f}mm")
             elif axis == "cut_z":
                 # Y is height in vispy (Z is left-right); cut_z = cutting height
-                self._e_cut_z.set(round(y, 1))
-            self._status_lbl.setText(f"✓ {axis} set.")
+                val = round(y, 1)
+                self._e_cut_z.set(val)
+                self._finish_pick(done_text=f"✓  Cut Z  {val:.1f}mm")
+            else:
+                self._finish_pick()
+            self._status_lbl.setText("✓ 設定しました")
             self._update_wb_label()
-            self._finish_pick()
 
         def _miss():
             self._status_lbl.setText(f"ミス — モデル面をクリックしてください ({msg})")
@@ -836,7 +945,7 @@ class MainWindow(QMainWindow):
 
     # ── Blender process ────────────────────────────────────────────────────
 
-    def _run_process(self):
+    def _run_process(self, mode: str = "full"):
         if self._processing:
             return
         if not self._model_path:
@@ -849,6 +958,7 @@ class MainWindow(QMainWindow):
 
         params = {
             "input_file": self._model_path,
+            "mode": mode,
             "orientation": {
                 "rx": self._e_rot_x.get(),
                 "ry": self._e_rot_y.get(),
@@ -862,6 +972,8 @@ class MainWindow(QMainWindow):
                 "front_width":    self._e_front_w.get(),
                 "rear_diameter":  self._e_rear_d.get(),
                 "rear_width":     self._e_rear_w.get(),
+                "front_cy":       self._front_axle_y,   # タイヤ中心Y (mm, Noneなら自動)
+                "rear_cy":        self._rear_axle_y,
             },
             "wheelbase_target": self._e_wheelbase.get(),
             "body_target": {
@@ -884,8 +996,15 @@ class MainWindow(QMainWindow):
 
         self._processing = True
         self._run_btn.setEnabled(False)
+        self._test_tire_btn.setEnabled(False)
+        if mode == "tire_cut_only":
+            self._run_btn.setText("処理中…")
+            self._status_lbl.setText("⏳ タイヤカット処理中…")
+        else:
+            self._run_btn.setText("処理中…")
+            self._status_lbl.setText("⏳ 処理中です。しばらくお待ちください…")
         self._progress.setVisible(True)
-        self._status_lbl.setText("Processing… please wait")
+        self._status_lbl.setStyleSheet("font-size: 12px;")
 
         self._signals = _WorkerSignals()
         self._signals.done.connect(self._on_done)
@@ -906,17 +1025,21 @@ class MainWindow(QMainWindow):
     def _on_done(self, code: int, stdout: str, stderr: str):
         self._processing = False
         self._run_btn.setEnabled(True)
+        self._run_btn.setText("▶  Blender で処理を実行")
+        self._test_tire_btn.setEnabled(True)
         self._progress.setVisible(False)
 
         if code != 0:
-            self._status_lbl.setText(f"Error (exit code {code})")
+            self._status_lbl.setStyleSheet("font-size: 12px; color: #ff6b35;")
+            self._status_lbl.setText(f"❌ エラーが発生しました (code {code})")
             QMessageBox.critical(
-                self, "Blender Error",
-                f"Process failed (code {code}).\n\n{stderr[-1200:]}"
+                self, "Blender エラー",
+                f"処理に失敗しました (終了コード {code})。\n\nタイヤ位置の設定を見直してください。\n\n詳細:\n{stderr[-1200:]}"
             )
             return
 
-        self._status_lbl.setText("Done!")
+        self._status_lbl.setStyleSheet("font-size: 12px; color: #39d353;")
+        self._status_lbl.setText("✅ 処理が完了しました！")
 
         loose_json = os.path.join(PREVIEW_DIR, "loose_parts.json")
         self._loose_parts = []
@@ -928,7 +1051,7 @@ class MainWindow(QMainWindow):
                 for p in self._loose_parts:
                     self._parts_list.addItem(
                         QListWidgetItem(
-                            f"{p['name']}  vol: {p.get('volume', 0):.2f} mm³"
+                            f"{p['name']}  vol: {p.get('volume_mm3', 0):.0f} mm³"
                         )
                     )
             except Exception:
@@ -936,8 +1059,31 @@ class MainWindow(QMainWindow):
 
         result_stl = os.path.join(PREVIEW_DIR, "result.stl")
         if self._renderer.available and os.path.isfile(result_stl):
-            self._renderer.load(result_stl)
+            self._renderer.load_result(result_stl)
+            # フルモード時: WBスケール比からRC径の描画座標をスケール後に更新
+            front_x  = self._e_front_x.get()
+            rear_x   = self._e_rear_x.get()
+            target_wb = self._e_wheelbase.get()
+            current_wb = abs(front_x - rear_x)
+            if current_wb > 1.0 and target_wb > 0:
+                wb_ratio = target_wb / current_wb
+                self._result_front_x = front_x * wb_ratio
+                self._result_rear_x  = rear_x  * wb_ratio
+            else:
+                # tire_cut_only など: スケールなし → オリジナル座標のまま
+                self._result_front_x = None
+                self._result_rear_x  = None
+            # スケール後のCut Z: cut_z * scale_y（Yスケール適用後の実際のカット位置）
+            original_height = self._model_size.get('Y_mm', 0)
+            target_height   = self._e_body_height.get()
+            cut_z_val = self._e_cut_z.get()
+            if original_height > 0 and target_height > 0:
+                scale_y = target_height / original_height
+                self._result_cut_z = cut_z_val * scale_y
+            else:
+                self._result_cut_z = cut_z_val  # スケールなし
             self._update_viz()
+            self._clear_result_btn.setVisible(True)
 
     # ── cleanup ────────────────────────────────────────────────────────────
 

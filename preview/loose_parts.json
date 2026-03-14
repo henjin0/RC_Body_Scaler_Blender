@@ -1,6 +1,10 @@
 [
   {
+    "name": "RCBody.001",
+    "volume_mm3": 1274.58
+  },
+  {
     "name": "RCBody",
-    "volume_mm3": 0.0
+    "volume_mm3": 38145.45
   }
 ]

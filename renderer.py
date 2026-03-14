@@ -130,6 +130,10 @@ class Renderer3D:
 
     def __init__(self, bgcolor: str = "#070a0d"):
         self._mesh_vis: object = None
+        self._result_mesh_vis: object = None
+        self._result_verts: np.ndarray | None = None
+        self._result_faces: np.ndarray | None = None
+        self._has_result: bool = False
         self._helpers: list      = []
         self._orient_vis: list   = []          # direction arrows / labels
         self._orig_verts: np.ndarray | None = None   # pre-rotation vertices
@@ -235,6 +239,10 @@ class Renderer3D:
         v = np.array(m.vertices, dtype=np.float32)
         f = np.array(m.faces,    dtype=np.int32)
 
+        if len(v) == 0:
+            print(f"[Renderer] load error: mesh has no vertices: {filepath}")
+            return {}
+
         # Unit detection: if max extent < 10 assume meters → convert to mm
         ext = v.max(axis=0) - v.min(axis=0)
         if float(ext.max()) < 10.0:
@@ -254,6 +262,11 @@ class Renderer3D:
             self.view.camera.distance    = d * 2.2
             self.view.camera.scale_factor = max(d * 100.0, 100000.0)  # near~1mm, far effectively infinite
 
+        # Clear any previous result overlay
+        self._has_result = False
+        self._result_verts = None
+        self._result_faces = None
+
         self._refresh_mesh()
         self._clear_helpers()
         self._update_orient_vis()
@@ -265,6 +278,48 @@ class Renderer3D:
             "faces": len(f),
             "verts": len(v),
         }
+
+    def load_result(self, filepath: str) -> dict:
+        """Load Blender result STL as a teal overlay alongside the original model."""
+        if not HAS_TRIMESH:
+            return {}
+        try:
+            m = _tm.load(filepath, force="mesh")
+        except Exception as e:
+            print(f"[Renderer] load_result error: {e}")
+            return {}
+
+        v = np.array(m.vertices, dtype=np.float32)
+        f = np.array(m.faces,    dtype=np.int32)
+
+        if len(v) == 0:
+            print(f"[Renderer] load_result: mesh has no vertices: {filepath}")
+            return {}
+
+        ext = v.max(axis=0) - v.min(axis=0)
+        if float(ext.max()) < 10.0:
+            v   *= 1000.0
+            ext *= 1000.0
+
+        self._result_verts = v
+        self._result_faces = f
+        self._has_result   = True
+
+        self._refresh_mesh()
+        return {
+            "X_mm": float(ext[0]),
+            "Y_mm": float(ext[1]),
+            "Z_mm": float(ext[2]),
+            "faces": len(f),
+            "verts": len(v),
+        }
+
+    def clear_result(self):
+        """Remove the result overlay and return to normal single-model display."""
+        self._has_result   = False
+        self._result_verts = None
+        self._result_faces = None
+        self._refresh_mesh()
 
     # ── rotation ──────────────────────────────────────────────────────────
 
@@ -306,6 +361,9 @@ class Renderer3D:
         if self._mesh_vis is not None:
             self._mesh_vis.parent = None
             self._mesh_vis = None
+        if self._result_mesh_vis is not None:
+            self._result_mesh_vis.parent = None
+            self._result_mesh_vis = None
         if self._verts is None:
             return
 
@@ -313,20 +371,32 @@ class Renderer3D:
         md    = _VMeshData(vertices=v, faces=f)
         scene = self.view.scene
 
-        if self._mode == "wireframe":
+        if self._has_result and self._result_verts is not None:
+            # 結果モデルのみ表示（元モデルは非表示）
+            rmd  = _VMeshData(vertices=self._result_verts, faces=self._result_faces)
+            rvis = _VMesh(meshdata=rmd, color=(0.0, 0.88, 0.72, 0.95),
+                          shading="smooth", parent=scene)
+            rvis.set_gl_state("opaque", depth_test=True, cull_face=False)
+            self._result_mesh_vis = rvis
+
+        elif self._mode == "wireframe":
             vis = _VMesh(meshdata=md, color=(0.0, 0.9, 1.0, 0.85),
                          mode="lines", parent=scene)
+            self._mesh_vis = vis
 
         elif self._mode == "transparent":
             vis = _VMesh(meshdata=md, color=(0.47, 0.56, 0.61, 0.30),
                          shading="smooth", parent=scene)
             vis.set_gl_state("translucent", depth_test=True, cull_face=False)
+            self._mesh_vis = vis
 
         else:  # solid
             vis = _VMesh(meshdata=md, color=(0.47, 0.56, 0.61, 1.0),
                          shading="smooth", parent=scene)
+            self._mesh_vis = vis
 
-        self._mesh_vis = vis
+        # 描画を強制更新
+        self.canvas.update()
 
     # ── helpers (tires + cut plane) ───────────────────────────────────────
 
@@ -334,69 +404,215 @@ class Renderer3D:
         self,
         front_x: float, rear_x: float, offset_y: float,
         front_r: float, rear_r: float, cut_z: float,
+        front_cut_r: float | None = None, rear_cut_r: float | None = None,
+        front_cy: float | None = None, rear_cy: float | None = None,
         front_w: float = 26.0, rear_w: float = 26.0,
+        result_front_x: float | None = None, result_rear_x: float | None = None,
+        cut_z_result: float | None = None,
     ):
         self._clear_helpers()
         if not self.canvas or self._verts is None:
             return
 
-        # vispy coordinate system: X=front-back, Y=up-down, Z=left-right
-        # Tire center Y = model bottom + radius (wheels sit at bottom of body)
-        # Tire center Z = ±offset_y (lateral offset, same value as Blender's Y offset)
         v = self._verts
-        model_y_min = float(v[:, 1].min())
+        model_y_ctr  = float((v[:, 1].max() + v[:, 1].min()) / 2.0)
+        model_z_ctr  = float(v[:, 2].mean())
+        model_z_half = float(v[:, 2].max() - v[:, 2].min()) / 2.0 * 1.05
 
-        # Four tire cylinders: Z-aligned (axle along Z = left-right)
-        tire_specs = [
-            (front_x,  offset_y,  front_r, front_w, "#00e5ff", "FL"),
-            (front_x, -offset_y,  front_r, front_w, "#00e5ff", "FR"),
-            (rear_x,   offset_y,  rear_r,  rear_w,  "#ff6b35", "RL"),
-            (rear_x,  -offset_y,  rear_r,  rear_w,  "#ff6b35", "RR"),
+        cy_front = front_cy if front_cy is not None else model_y_ctr
+        cy_rear  = rear_cy  if rear_cy  is not None else model_y_ctr
+
+        # ── 結果オーバーレイ中: カット径のみ表示（どこをカットしたかの参考）──────
+        # ── 通常時: RC径 + カット径 の両方を表示 ─────────────────────────────────
+
+        axle_specs = [
+            (front_x, front_r, front_cut_r, cy_front, "#00e5ff", "FRONT"),
+            (rear_x,  rear_r,  rear_cut_r,  cy_rear,  "#ff6b35", "REAR"),
         ]
-        for x, cz, r, w, col, tag in tire_specs:
-            cy_tire = model_y_min + r   # tire center at radius height above body bottom
-            half_h = max(w / 2.0, 1.0)
-            vv, ff = _cylinder_mesh_z(x, cy_tire, cz, r, half_h)
-            vis = _VMesh(
-                vertices=vv, faces=ff,
-                color=_hex_rgba(col, 0.60),
-                parent=self.view.scene,
-            )
-            vis.set_gl_state("translucent", depth_test=True, cull_face=False)
-            self._helpers.append(vis)
+        for x, r, cut_r, cy, col, tag in axle_specs:
 
-            # Label next to the tire
+            if not self._has_result:
+                # 通常時: RC径シリンダー
+                vv, ff = _cylinder_mesh_z(x, cy, model_z_ctr, r, model_z_half)
+                vis = _VMesh(
+                    vertices=vv, faces=ff,
+                    color=_hex_rgba(col, 0.50),
+                    parent=self.view.scene,
+                )
+                vis.set_gl_state("translucent", depth_test=True, cull_face=False)
+                self._helpers.append(vis)
+
+            # カット径シリンダー (常に表示 — 結果時は「ここをカットした」の参考)
+            if cut_r is not None:
+                vvc, ffc = _cylinder_mesh_z(x, cy, model_z_ctr, cut_r, model_z_half)
+                visc = _VMesh(
+                    vertices=vvc, faces=ffc,
+                    color=(1.0, 0.85, 0.0, 0.28),
+                    parent=self.view.scene,
+                )
+                visc.set_gl_state("translucent", depth_test=True, cull_face=False)
+                self._helpers.append(visc)
+
+            # ラベル
             try:
-                lbl_pos = np.array([x, cy_tire + r + 8, cz], dtype=np.float32)
+                lbl_r   = cut_r if cut_r is not None else r
+                lbl_pos = np.array([x, cy + lbl_r + 10, model_z_ctr], dtype=np.float32)
+                if self._has_result:
+                    lbl_txt = f"{tag}  Cut:{cut_r*2:.0f}mm" if cut_r is not None else tag
+                else:
+                    lbl_txt = f"{tag}  RC:{r*2:.0f}mm"
+                    if cut_r is not None and abs(cut_r - r) > 0.5:
+                        lbl_txt += f"  Cut:{cut_r*2:.0f}mm"
                 txt = _VText(
-                    tag, pos=lbl_pos,
+                    lbl_txt, pos=lbl_pos,
                     color=_hex_rgba(col, 1.0),
-                    font_size=8, bold=True,
+                    font_size=9, bold=True,
                     parent=self.view.scene,
                 )
                 self._helpers.append(txt)
             except Exception:
                 pass
 
-        # Cut plane: horizontal at Y=cut_z (cut_z value is height, mapped from Blender Z)
-        ex = float(v[:, 0].max() - v[:, 0].min()) * 0.55
-        ez = float(v[:, 2].max() - v[:, 2].min()) * 0.55
-        cx, cz_mid = float(v[:, 0].mean()), float(v[:, 2].mean())
-        pv = np.array(
-            [[cx - ex, cut_z, cz_mid - ez],
-             [cx + ex, cut_z, cz_mid - ez],
-             [cx + ex, cut_z, cz_mid + ez],
-             [cx - ex, cut_z, cz_mid + ez]],
-            dtype=np.float32,
-        )
-        pf = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
-        plane = _VMesh(
-            vertices=pv, faces=pf,
-            color=(1.0, 0.42, 0.21, 0.28),
-            parent=self.view.scene,
-        )
-        plane.set_gl_state("translucent", depth_test=False)
-        self._helpers.append(plane)
+        # ホイールベースライン
+        try:
+            wb_line = _VLine(
+                pos=np.array([[front_x, cy_front, model_z_ctr],
+                              [rear_x,  cy_rear,  model_z_ctr]],
+                             dtype=np.float32),
+                color=(1.0, 1.0, 1.0, 0.7), width=2,
+                parent=self.view.scene,
+            )
+            self._helpers.append(wb_line)
+
+            mid_x  = (front_x + rear_x) / 2.0
+            mid_cy = (cy_front + cy_rear) / 2.0
+            wb_mm  = abs(front_x - rear_x)
+            max_r  = max(front_r, rear_r) if not self._has_result else (
+                max(front_cut_r, rear_cut_r) if front_cut_r and rear_cut_r else max(front_r, rear_r))
+            wb_lbl = _VText(
+                f"WB {wb_mm:.0f}mm",
+                pos=np.array([mid_x, mid_cy + max_r + 10, model_z_ctr], dtype=np.float32),
+                color=(1.0, 1.0, 1.0, 0.9), font_size=9, bold=True,
+                parent=self.view.scene,
+            )
+            self._helpers.append(wb_lbl)
+
+            if not self._has_result:
+                for side_z in (model_z_ctr + offset_y, model_z_ctr - offset_y):
+                    track_line = _VLine(
+                        pos=np.array([[front_x, cy_front, side_z],
+                                      [rear_x,  cy_rear,  side_z]], dtype=np.float32),
+                        color=(0.6, 0.6, 0.6, 0.4), width=1,
+                        parent=self.view.scene,
+                    )
+                    self._helpers.append(track_line)
+        except Exception:
+            pass
+
+        # ── カットツールボディの可視化 ──────────────────────────────────────
+        # 結果表示中: result_vertsのバウンディングボックスを使い、cut_z_resultを優先
+        # 通常時:    元モデルのバウンディングボックスとcut_zを使用
+        if self._has_result and self._result_verts is not None:
+            vb = self._result_verts
+            eff_cut_z = cut_z_result  # Noneの場合は表示しない
+        else:
+            vb = v
+            eff_cut_z = cut_z
+
+        if eff_cut_z is not None:
+            min_y_b = float(vb[:, 1].min())
+            ex_b = float(vb[:, 0].max() - vb[:, 0].min()) * 0.56
+            ez_b = float(vb[:, 2].max() - vb[:, 2].min()) * 0.56
+            cx_b  = float(vb[:, 0].mean())
+            cz_b  = float(vb[:, 2].mean())
+
+            if eff_cut_z > min_y_b + 0.5:
+                # 除去されるゾーン: min_y_b から eff_cut_z までの半透明ボックス
+                pad = max(abs(min_y_b) * 0.05, 5.0)
+                bv = np.array([
+                    [cx_b - ex_b, min_y_b - pad, cz_b - ez_b],
+                    [cx_b + ex_b, min_y_b - pad, cz_b - ez_b],
+                    [cx_b + ex_b, min_y_b - pad, cz_b + ez_b],
+                    [cx_b - ex_b, min_y_b - pad, cz_b + ez_b],
+                    [cx_b - ex_b, eff_cut_z,     cz_b - ez_b],
+                    [cx_b + ex_b, eff_cut_z,     cz_b - ez_b],
+                    [cx_b + ex_b, eff_cut_z,     cz_b + ez_b],
+                    [cx_b - ex_b, eff_cut_z,     cz_b + ez_b],
+                ], dtype=np.float32)
+                bf = np.array([
+                    [0,2,1],[0,3,2],  # 底面
+                    [4,5,6],[4,6,7],  # 上面 (カット平面)
+                    [0,1,5],[0,5,4],  # 前面
+                    [3,7,6],[3,6,2],  # 後面
+                    [1,2,6],[1,6,5],  # 右面
+                    [0,4,7],[0,7,3],  # 左面
+                ], dtype=np.int32)
+                cut_body = _VMesh(
+                    vertices=bv, faces=bf,
+                    color=(1.0, 0.28, 0.05, 0.32),
+                    parent=self.view.scene,
+                )
+                cut_body.set_gl_state("translucent", depth_test=False)
+                self._helpers.append(cut_body)
+
+                # カット平面の輪郭ライン（明るいオレンジ）
+                outline = np.array([
+                    [cx_b - ex_b, eff_cut_z, cz_b - ez_b],
+                    [cx_b + ex_b, eff_cut_z, cz_b - ez_b],
+                    [cx_b + ex_b, eff_cut_z, cz_b + ez_b],
+                    [cx_b - ex_b, eff_cut_z, cz_b + ez_b],
+                    [cx_b - ex_b, eff_cut_z, cz_b - ez_b],
+                ], dtype=np.float32)
+                cut_outline = _VLine(
+                    pos=outline, color=(1.0, 0.55, 0.0, 1.0), width=2,
+                    parent=self.view.scene,
+                )
+                self._helpers.append(cut_outline)
+
+                # ラベル
+                try:
+                    lbl_pos = np.array(
+                        [cx_b, eff_cut_z + abs(eff_cut_z - min_y_b) * 0.1 + 5, cz_b + ez_b],
+                        dtype=np.float32,
+                    )
+                    cut_lbl = _VText(
+                        f"CUT Z  {eff_cut_z:.1f}mm",
+                        pos=lbl_pos,
+                        color=(1.0, 0.65, 0.0, 1.0),
+                        font_size=9, bold=True,
+                        parent=self.view.scene,
+                    )
+                    self._helpers.append(cut_lbl)
+                except Exception:
+                    pass
+            else:
+                # カットゾーンがほぼゼロ → 警告色の平面のみ
+                pv = np.array([
+                    [cx_b - ex_b, eff_cut_z, cz_b - ez_b],
+                    [cx_b + ex_b, eff_cut_z, cz_b - ez_b],
+                    [cx_b + ex_b, eff_cut_z, cz_b + ez_b],
+                    [cx_b - ex_b, eff_cut_z, cz_b + ez_b],
+                ], dtype=np.float32)
+                pf = np.array([[0,1,2],[0,2,3]], dtype=np.int32)
+                plane = _VMesh(
+                    vertices=pv, faces=pf,
+                    color=(1.0, 0.0, 0.0, 0.50),
+                    parent=self.view.scene,
+                )
+                plane.set_gl_state("translucent", depth_test=False)
+                self._helpers.append(plane)
+                try:
+                    warn_pos = np.array([cx_b, eff_cut_z + 5, cz_b + ez_b], dtype=np.float32)
+                    warn_lbl = _VText(
+                        "⚠ CUT Z が底面以下 — カット不可",
+                        pos=warn_pos,
+                        color=(1.0, 0.0, 0.0, 1.0),
+                        font_size=9, bold=True,
+                        parent=self.view.scene,
+                    )
+                    self._helpers.append(warn_lbl)
+                except Exception:
+                    pass
 
     def _clear_helpers(self):
         for h in self._helpers:

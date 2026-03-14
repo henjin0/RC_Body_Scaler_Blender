@@ -46,6 +46,8 @@ def main():
     remove_parts = params.get("remove_parts", [])
     output_dir = params.get("output_dir", os.path.join(BASE_DIR, "outputs"))
     preview_dir = params.get("preview_dir", os.path.join(BASE_DIR, "preview"))
+    # mode: "full"（全処理）or "tire_cut_only"（タイヤカットのみ）
+    mode = params.get("mode", "full")
 
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(preview_dir, exist_ok=True)
@@ -108,14 +110,23 @@ def main():
         log("Removing tires (boolean subtract)...")
         _remove_tires(obj, wheels)
 
+        if mode == "tire_cut_only":
+            log("mode=tire_cut_only: スケール・Solidify・底面カットをスキップして出力します")
+            result_stl = os.path.join(preview_dir, "result.stl")
+            _export_main_stl(result_stl, is_blender4)
+            log(f"STL exported (tire_cut_only): {result_stl}")
+            log("Done.")
+            sys.exit(0)
+
         # ---- ホイールベース調整 ----
-        front_x_m = wheels["front_x"] / 1000.0
-        rear_x_m = wheels["rear_x"] / 1000.0
-        current_wb = front_x_m - rear_x_m
-        target_wb_m = wb_target / 1000.0
+        # 注意: STLはmm値のままBlenderにインポートされるため、単位変換は不要。
+        # Blender内の座標値 = vispy内のmm値（どちらも同一の数値）
+        front_x = wheels["front_x"]
+        rear_x  = wheels["rear_x"]
+        current_wb = front_x - rear_x
         if current_wb > 0:
-            scale_x = target_wb_m / current_wb
-            log(f"Scaling X: {scale_x:.4f} (WB: {current_wb*1000:.1f}mm -> {wb_target:.1f}mm)")
+            scale_x = wb_target / current_wb
+            log(f"Scaling X: {scale_x:.4f} (WB: {current_wb:.1f}mm -> {wb_target:.1f}mm)")
             obj.scale.x *= scale_x
             bpy.ops.object.select_all(action='DESELECT')
             obj.select_set(True)
@@ -127,39 +138,55 @@ def main():
         target_width_mm  = body_target.get("width_mm",  0)
         target_height_mm = body_target.get("height_mm", 0)
 
+        # Cut Z は処理前モデル基準でピックされる。
+        # Yスケール適用後は座標が変わるので、スケール係数を記録して補正する。
+        applied_scale_y = 1.0
+
         if target_width_mm > 0 or target_height_mm > 0:
             from mathutils import Vector
             bbox_corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
-            cur_width_m  = max(v.y for v in bbox_corners) - min(v.y for v in bbox_corners)
-            cur_height_m = max(v.z for v in bbox_corners) - min(v.z for v in bbox_corners)
+            # 向き調整後: Blender Z = 左右（幅）、Blender Y = 上下（高さ）
+            cur_width  = max(v.z for v in bbox_corners) - min(v.z for v in bbox_corners)
+            cur_height = max(v.y for v in bbox_corners) - min(v.y for v in bbox_corners)
 
-            if target_width_mm > 0 and cur_width_m > 1e-6:
-                scale_y = (target_width_mm / 1000.0) / cur_width_m
-                log(f"Scaling Y (width): {scale_y:.4f}  ({cur_width_m*1000:.1f} -> {target_width_mm:.1f} mm)")
-                obj.scale.y *= scale_y
-                bpy.ops.object.select_all(action='DESELECT')
-                obj.select_set(True)
-                bpy.context.view_layer.objects.active = obj
-                bpy.ops.object.transform_apply(scale=True)
-
-            if target_height_mm > 0 and cur_height_m > 1e-6:
-                scale_z = (target_height_mm / 1000.0) / cur_height_m
-                log(f"Scaling Z (height): {scale_z:.4f}  ({cur_height_m*1000:.1f} -> {target_height_mm:.1f} mm)")
+            if target_width_mm > 0 and cur_width > 1e-3:
+                scale_z = target_width_mm / cur_width
+                log(f"Scaling Z (width): {scale_z:.4f}  ({cur_width:.1f} -> {target_width_mm:.1f} mm)")
                 obj.scale.z *= scale_z
                 bpy.ops.object.select_all(action='DESELECT')
                 obj.select_set(True)
                 bpy.context.view_layer.objects.active = obj
                 bpy.ops.object.transform_apply(scale=True)
 
-        # ---- ソリッファイ（肉厚付与） ----
-        thickness_m = solidify_params["thickness"] / 1000.0
-        direction = solidify_params["direction"]
-        log(f"Solidify: thickness={solidify_params['thickness']}mm, direction={direction}")
-        _solidify(obj, thickness_m, direction)
+            if target_height_mm > 0 and cur_height > 1e-3:
+                scale_y = target_height_mm / cur_height
+                applied_scale_y = scale_y
+                log(f"Scaling Y (height): {scale_y:.4f}  ({cur_height:.1f} -> {target_height_mm:.1f} mm)")
+                obj.scale.y *= scale_y
+                bpy.ops.object.select_all(action='DESELECT')
+                obj.select_set(True)
+                bpy.context.view_layer.objects.active = obj
+                bpy.ops.object.transform_apply(scale=True)
+
+        # ---- 中空化前のメッシュ修復 ----
+        log("Repairing mesh before hollow boolean...")
+        _repair_mesh(obj)
+
+        # ---- 中空化（内側縮小コピーのブーリアン差分） ----
+        # Solidifyモディファイアではなく、バウンディングボックス中心まわりに
+        # (outer - 2*thickness) / outer でスケールした内側コピーを差し引く。
+        # 各軸の壁厚 ≈ thickness mm（平坦面では厳密に一致）。
+        thickness = solidify_params["thickness"]   # mm
+        log(f"Hollow Boolean: thickness={thickness}mm")
+        _hollow_boolean(obj, thickness)
 
         # ---- ボディ下部カット ----
-        log(f"Cutting bottom at Z={cut_z_mm}mm...")
-        _cut_bottom(obj, cut_z_mm / 1000.0)
+        # cut_z_mm は処理前モデルのvispy Y座標（= Blender Y値）。
+        # Yスケール適用後の座標に補正して渡す。
+        cut_y = cut_z_mm * applied_scale_y
+        log(f"Cutting bottom at Y={cut_y:.1f}mm "
+            f"(picked={cut_z_mm:.1f}mm × scale_y={applied_scale_y:.4f})...")
+        _cut_bottom(obj, cut_y)
 
         # ---- 中間ファイル保存 ----
         intermediate_path = os.path.join(preview_dir, "intermediate.blend")
@@ -256,6 +283,7 @@ def _decimate(obj, ratio: float):
 
 
 def _solidify(obj, thickness_m: float, direction: str):
+    """Solidifyモディファイア（現在は未使用 — _hollow_boolean を参照）"""
     mod = obj.modifiers.new(name="Solidify", type='SOLIDIFY')
     mod.thickness = thickness_m
     mod.offset = -1.0 if direction == "inner" else 1.0
@@ -263,6 +291,60 @@ def _solidify(obj, thickness_m: float, direction: str):
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier="Solidify")
+
+
+def _hollow_boolean(obj, thickness: float):
+    """
+    スケール済みモデルから「厚さ分だけ縮小した内側コピー」をブーリアン差分して中空化する。
+
+    各軸の縮小スケール = (outer_dim - 2*thickness) / outer_dim
+    スケールはバウンディングボックス中心まわりに適用するため、
+    平坦面の壁厚は thickness mm に正確に一致する。
+
+    タイヤカット・WB/幅/高さスケーリング完了後に呼ぶこと。
+    """
+    from mathutils import Vector
+
+    bbox = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    cur_x = max(v.x for v in bbox) - min(v.x for v in bbox)
+    cur_y = max(v.y for v in bbox) - min(v.y for v in bbox)
+    cur_z = max(v.z for v in bbox) - min(v.z for v in bbox)
+
+    min_dim = 4 * thickness   # 寸法が肉厚の4倍未満なら中空化不可
+    if cur_x < min_dim or cur_y < min_dim or cur_z < min_dim:
+        log(f"Warning: Model too small to hollow "
+            f"(x={cur_x:.1f} y={cur_y:.1f} z={cur_z:.1f} / min={min_dim:.1f}mm). Skipping.")
+        return
+
+    sx = (cur_x - 2 * thickness) / cur_x
+    sy = (cur_y - 2 * thickness) / cur_y
+    sz = (cur_z - 2 * thickness) / cur_z
+
+    log(f"  outer: x={cur_x:.1f} y={cur_y:.1f} z={cur_z:.1f} mm")
+    log(f"  inner scale: sx={sx:.4f} sy={sy:.4f} sz={sz:.4f}")
+
+    # ── 内側コピーを作成 ──────────────────────────────────────
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.duplicate(linked=False)
+    inner_obj = bpy.context.active_object
+    inner_obj.name = "RCBody_Inner"
+
+    # バウンディングボックス中心を原点に移動してからスケール
+    # → 中心まわりに均等縮小（各面の余白 ≈ thickness mm）
+    bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+    inner_obj.scale.x *= sx
+    inner_obj.scale.y *= sy
+    inner_obj.scale.z *= sz
+
+    bpy.ops.object.select_all(action='DESELECT')
+    inner_obj.select_set(True)
+    bpy.context.view_layer.objects.active = inner_obj
+    bpy.ops.object.transform_apply(scale=True)
+
+    # ── ブーリアン差分: 外側 − 内側 = 中空シェル ─────────────
+    _boolean_subtract(obj, inner_obj)
 
 
 def _make_cylinder(location, radius_m: float, height_m: float, rotation_euler=None) -> bpy.types.Object:
@@ -289,81 +371,125 @@ def _boolean_subtract(target: bpy.types.Object, cutter: bpy.types.Object):
     mod = target.modifiers.new(name="Bool_Sub", type='BOOLEAN')
     mod.operation = 'DIFFERENCE'
     mod.object = cutter
-    # Blender 3.x / 4.x 共通の solver 設定
+    # EXACT ソルバーを優先（より確実）、なければ FAST にフォールバック
     try:
-        mod.solver = 'FAST'
-    except AttributeError:
-        pass
+        mod.solver = 'EXACT'
+    except (AttributeError, TypeError):
+        try:
+            mod.solver = 'FAST'
+        except (AttributeError, TypeError):
+            pass
 
+    vert_before = len(target.data.vertices)
     bpy.ops.object.modifier_apply(modifier="Bool_Sub")
+    vert_after = len(target.data.vertices)
+    log(f"  Boolean: {vert_before} verts → {vert_after} verts")
 
     # カッターを削除
     bpy.data.objects.remove(cutter, do_unlink=True)
 
 
 def _remove_tires(obj, wheels: dict):
-    """4本のタイヤをシリンダーブーリアンで除去する"""
-    front_x = wheels["front_x"] / 1000.0
-    rear_x = wheels["rear_x"] / 1000.0
-    offset_y = wheels["offset_y"] / 1000.0
+    """4本のタイヤをシリンダーブーリアンで除去する。
+    向き調整（transform_apply）後の座標系：
+      Blender X = vispy X = 前後方向
+      Blender Y = vispy Y = 上下方向（高さ）
+      Blender Z = vispy Z = 左右方向（幅）
+    タイヤの軸はZ軸方向（左右）なのでデフォルトBlenderシリンダー（Z軸整列）をそのまま使う。
+    """
+    from mathutils import Vector
 
-    front_r = (wheels["front_diameter"] / 2.0) / 1000.0
-    front_h = wheels["front_width"] / 1000.0
-    rear_r = (wheels["rear_diameter"] / 2.0) / 1000.0
-    rear_h = wheels["rear_width"] / 1000.0
+    # 単位: STLはmm値のままBlenderにインポートされるため /1000 不要
+    front_x  = wheels["front_x"]
+    rear_x   = wheels["rear_x"]
+    offset_z = wheels["offset_y"]   # 左右オフセット (mm)
 
-    # シリンダーはY軸方向（横向き）に置く
-    # rotation_euler で X軸90度回転 → Y軸方向に高さが向く
-    rot_y = (math.pi / 2, 0, 0)
+    front_r = wheels["front_diameter"] / 2.0
+    rear_r  = wheels["rear_diameter"]  / 2.0
 
+    # タイヤ中心Y: UIでクリックした位置（vispy Y = Blender Y値）を優先。
+    # 未設定の場合はバウンディングボックスの最小Y + タイヤ半径で自動推定。
+    bbox_corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    auto_y = min(v.y for v in bbox_corners) + max(front_r, rear_r)
+
+    raw_front_cy = wheels.get("front_cy")
+    raw_rear_cy  = wheels.get("rear_cy")
+    front_cy = raw_front_cy if raw_front_cy is not None else auto_y
+    rear_cy  = raw_rear_cy  if raw_rear_cy  is not None else auto_y
+
+    # 車体のZ中心・幅をBBoxから計算
+    min_z = min(v.z for v in bbox_corners)
+    max_z = max(v.z for v in bbox_corners)
+    car_z_center = (min_z + max_z) / 2.0
+    car_z_extent = max_z - min_z
+
+    # シリンダーのZ深さ: 車体の全幅×2 で確実にカットスルー（どこに置いても貫通）
+    cyl_depth = car_z_extent * 2.0
+
+    # Y Offset が車幅の30%未満ならタイヤ位置として不合理 → 自動補正
+    # （タイヤは通常 Z中心から 35〜50% 程度の位置にある）
+    min_reasonable = car_z_extent * 0.35
+    if offset_z < min_reasonable:
+        log(f"Y Offset {offset_z:.1f}mm が小さすぎるため自動補正: "
+            f"{min_reasonable:.1f}mm (car_z_extent={car_z_extent:.1f}mm の 35%)")
+        offset_z = min_reasonable
+
+    log(f"Car Z: center={car_z_center:.1f}mm  extent={car_z_extent:.1f}mm")
+    log(f"Tire Z positions: +{(car_z_center+offset_z):.1f}mm / {(car_z_center-offset_z):.1f}mm")
+    log(f"Tire axle Y: front={front_cy:.1f}mm  rear={rear_cy:.1f}mm  (auto={auto_y:.1f}mm)")
+    log(f"Cylinder depth (Z): {cyl_depth:.1f}mm")
+
+    # シリンダーはZ軸方向（左右）に置く。
+    # Z位置 = 車体Z中心 ± offset_z（モデル中心基準の相対オフセット）
     tire_configs = [
-        # (x, y, radius, height)
-        (front_x, offset_y, front_r, front_h),    # 前左
-        (front_x, -offset_y, front_r, front_h),   # 前右
-        (rear_x, offset_y, rear_r, rear_h),        # 後左
-        (rear_x, -offset_y, rear_r, rear_h),       # 後右
+        # (x, cy, z, radius)
+        (front_x, front_cy,  car_z_center + offset_z, front_r),   # 前右
+        (front_x, front_cy,  car_z_center - offset_z, front_r),   # 前左
+        (rear_x,  rear_cy,   car_z_center + offset_z, rear_r),    # 後右
+        (rear_x,  rear_cy,   car_z_center - offset_z, rear_r),    # 後左
     ]
 
-    for x, y, r, h in tire_configs:
-        # Z座標は車体の中心（0）付近
-        cyl = _make_cylinder(location=(x, y, 0), radius_m=r, height_m=h * 2,
-                             rotation_euler=rot_y)
+    for x, cy, z, r in tire_configs:
+        log(f"  Cylinder at X={x:.1f} Y={cy:.1f} Z={z:.1f}  r={r:.1f}mm")
+        cyl = _make_cylinder(location=(x, cy, z), radius_m=r, height_m=cyl_depth,
+                             rotation_euler=None)
         try:
             _boolean_subtract(obj, cyl)
         except Exception as e:
-            log(f"Warning: Tire boolean failed at ({x:.3f}, {y:.3f}): {e}")
+            log(f"Warning: Tire boolean failed at x={x*1000:.1f} cy={cy*1000:.1f} z={z*1000:.1f}: {e}")
 
 
-def _cut_bottom(obj, cut_z_m: float):
+def _cut_bottom(obj, cut_y: float):
     """
-    Z < cut_z_m の部分を大きなボックスでブーリアン差分してカット。
-    cut_z_m == 0 の場合はバウンディングボックス最小Z付近を自動推定。
+    Y < cut_y の部分を大きなボックスでブーリアン差分してカット。
+    座標値はmm単位（vispy Y = Blender Y値、単位変換不要）。
+    cut_y == 0 の場合はバウンディングボックス最小Y付近を自動推定。
     """
     bbox = [obj.matrix_world @ v.co for v in obj.data.vertices]
-    min_z = min(v.z for v in bbox)
-    max_z = max(v.z for v in bbox)
-    size_xy = max(
+    min_y = min(v.y for v in bbox)
+    max_y = max(v.y for v in bbox)
+    size_xz = max(
         max(v.x for v in bbox) - min(v.x for v in bbox),
-        max(v.y for v in bbox) - min(v.y for v in bbox),
+        max(v.z for v in bbox) - min(v.z for v in bbox),
     ) * 3.0
 
-    if cut_z_m == 0:
+    if cut_y == 0:
         # 自動: モデル高さの下10%をカット
-        cut_z_m = min_z + (max_z - min_z) * 0.1
+        cut_y = min_y + (max_y - min_y) * 0.1
 
-    box_height = (cut_z_m - min_z) + 1.0  # カット平面からmin_zまでの高さ + 余裕
+    box_height = (cut_y - min_y) + 1.0  # カット平面からmin_yまでの高さ + 余裕
     if box_height <= 0:
         log("Warning: cut_z is below model bottom. Skipping bottom cut.")
         return
 
-    box_center_z = min_z + box_height / 2.0 - 0.001
+    box_center_y = min_y + box_height / 2.0 - 0.001
 
     bpy.ops.mesh.primitive_cube_add(
         size=1.0,
-        location=(0, 0, box_center_z),
+        location=(0, box_center_y, 0),
     )
     box = bpy.context.object
-    box.scale = (size_xy, size_xy, box_height)
+    box.scale = (size_xz, box_height, size_xz)
     bpy.ops.object.select_all(action='DESELECT')
     box.select_set(True)
     bpy.context.view_layer.objects.active = box
@@ -395,10 +521,10 @@ def _separate_and_list_loose_parts(obj, preview_dir: str) -> list:
     for part in parts:
         bm = bmesh.new()
         bm.from_mesh(part.data)
-        vol_m3 = abs(bm.calc_volume())
+        # STLはmm値のままインポートされるため、calc_volume()の戻り値は数値的にmm³
+        vol_mm3 = abs(bm.calc_volume())
         bm.free()
-        vol_mm3 = vol_m3 * 1e9  # m³ → mm³
-        parts_info.append({"name": part.name, "volume_mm3": round(vol_mm3, 6)})
+        parts_info.append({"name": part.name, "volume_mm3": round(vol_mm3, 2)})
 
     # 体積でソート（昇順）→ UIでは小さい部品が上に表示される
     parts_info.sort(key=lambda x: x["volume_mm3"])
@@ -443,7 +569,7 @@ def _export_main_stl(filepath: str, is_blender4: bool):
             bpy.ops.wm.stl_export(
                 filepath=filepath,
                 export_selected_objects=True,
-                global_scale=1000.0,  # m → mm
+                global_scale=1.0,  # STLはmm値のまま → 変換不要
             )
             return
         except Exception:
@@ -454,7 +580,7 @@ def _export_main_stl(filepath: str, is_blender4: bool):
         bpy.ops.export_mesh.stl(
             filepath=filepath,
             use_selection=True,
-            global_scale=1000.0,
+            global_scale=1.0,
         )
     except Exception as e:
         print(f"ERROR: STL export failed: {e}", file=sys.stderr)
