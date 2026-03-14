@@ -527,11 +527,19 @@ class Renderer3D:
             v_disp = v
 
         if self._has_result and self._result_verts is not None:
-            # 結果モデルのみ表示（元モデルは非表示）
-            rmd  = _VMeshData(vertices=self._result_verts, faces=self._result_faces)
-            rvis = _VMesh(meshdata=rmd, color=(0.0, 0.88, 0.72, 0.95),
-                          shading="smooth", parent=scene)
-            rvis.set_gl_state("opaque", depth_test=True, cull_face=False)
+            # 結果モデルのみ表示（SOLID/TRANSP/WIRE モードに対応）
+            rmd = _VMeshData(vertices=self._result_verts, faces=self._result_faces)
+            if self._mode == "wireframe":
+                rvis = _VMesh(meshdata=rmd, color=(0.0, 0.9, 0.7, 0.9),
+                              mode="lines", parent=scene)
+            elif self._mode == "transparent":
+                rvis = _VMesh(meshdata=rmd, color=(0.0, 0.88, 0.72, 0.35),
+                              shading="smooth", parent=scene)
+                rvis.set_gl_state("translucent", depth_test=True, cull_face=False)
+            else:  # solid
+                rvis = _VMesh(meshdata=rmd, color=(0.0, 0.88, 0.72, 1.0),
+                              shading="smooth", parent=scene)
+                rvis.set_gl_state("opaque", depth_test=True, cull_face=False)
             self._result_mesh_vis = rvis
 
         elif self._show_outer_shell:

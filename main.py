@@ -268,6 +268,7 @@ class MainWindow(QMainWindow):
         self._model_size: dict  = {}
         self._loose_parts: list = []
         self._processing   = False
+        self._proc         = None
         self._signals: _WorkerSignals | None = None
         self._parts_list_loose_indices: list = []  # row → loose part idx mapping
 
@@ -644,12 +645,18 @@ class MainWindow(QMainWindow):
         self._progress.setVisible(False)
         s4.add(self._progress)
 
+        self._cancel_btn = QPushButton("⏹  処理を中断")
+        self._cancel_btn.setProperty("role", "accent2")
+        self._cancel_btn.setVisible(False)
+        self._cancel_btn.clicked.connect(self._cancel_process)
+        s4.add(self._cancel_btn)
+
         self._status_lbl = QLabel("")
         self._status_lbl.setStyleSheet("font-size: 12px;")
         self._status_lbl.setWordWrap(True)
         s4.add(self._status_lbl)
 
-        self._clear_result_btn = QPushButton("✕  結果オーバーレイをクリア")
+        self._clear_result_btn = QPushButton("✕  結果をクリアして再編集")
         self._clear_result_btn.setProperty("role", "accent2")
         self._clear_result_btn.setVisible(False)
         self._clear_result_btn.clicked.connect(self._clear_result_overlay)
@@ -1166,10 +1173,12 @@ class MainWindow(QMainWindow):
             json.dump(params, f, indent=2)
 
         self._processing = True
+        self._proc = None
         self._run_btn.setEnabled(False)
         self._test_tire_btn.setEnabled(False)
         self._thru_btn.setEnabled(False)   # 処理中は無効化（非表示でなくdisable）
         self._clear_result_btn.setVisible(False)
+        self._cancel_btn.setVisible(True)
         self._renderer.hide_for_processing()   # 元モデル・結果モデルを非表示
         if mode == "tire_cut_only":
             self._run_btn.setText("処理中…")
@@ -1190,22 +1199,51 @@ class MainWindow(QMainWindow):
 
         def _worker():
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                signals.done.emit(result.returncode, result.stdout, result.stderr)
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, text=True)
+                self._proc = proc
+                stdout, stderr = proc.communicate(timeout=300)
+                signals.done.emit(proc.returncode, stdout, stderr)
             except subprocess.TimeoutExpired:
+                if self._proc:
+                    self._proc.kill()
                 signals.done.emit(-1, "", "Timeout after 5 minutes")
             except Exception as ex:
                 signals.done.emit(-1, "", str(ex))
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _on_done(self, code: int, stdout: str, stderr: str):
+    def _cancel_process(self):
+        """処理中の Blender プロセスを中断する。"""
+        if self._proc is not None:
+            try:
+                self._proc.terminate()
+            except Exception:
+                pass
+        # UI を処理前の状態に戻す（_on_done が呼ばれるのを待たずに即時復元）
         self._processing = False
+        self._proc = None
+        self._run_btn.setEnabled(True)
+        self._run_btn.setText("▶  Blender で処理を実行")
+        self._test_tire_btn.setEnabled(True)
+        self._thru_btn.setEnabled(True)
+        self._progress.setVisible(False)
+        self._cancel_btn.setVisible(False)
+        self._renderer.clear_result()   # 元モデルを再表示
+        self._status_lbl.setStyleSheet("font-size: 12px; color: #aaaaaa;")
+        self._status_lbl.setText("⏹ 処理を中断しました")
+
+    def _on_done(self, code: int, stdout: str, stderr: str):
+        if not self._processing:
+            return  # キャンセル済みなら無視
+        self._processing = False
+        self._proc = None
         self._run_btn.setEnabled(True)
         self._run_btn.setText("▶  Blender で処理を実行")
         self._test_tire_btn.setEnabled(True)
         self._thru_btn.setText("⚡  貫通カット 実行")
         self._progress.setVisible(False)
+        self._cancel_btn.setVisible(False)
 
         if code != 0:
             self._renderer.clear_result()   # エラー時は元モデルを再表示

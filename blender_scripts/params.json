@@ -7,23 +7,23 @@
     "rz": 0.0
   },
   "wheels": {
-    "front_x": 536.0,
-    "rear_x": -538.8,
+    "front_x": 541.1,
+    "rear_x": -537.6,
     "offset_y": 45.0,
     "front_diameter": 350.0,
     "rear_diameter": 350.0,
-    "front_cy": -152.6,
-    "rear_cy": -158.5
+    "front_cy": -157.2,
+    "rear_cy": -155.7
   },
   "wheelbase_target": 83.0,
   "body_target": {
     "width_mm": 65.0,
-    "height_mm": 50.0
+    "height_mm": 55.0
   },
   "shape": {
-    "stretch_x": 1.0,
-    "stretch_y": 1.0,
-    "stretch_z": 0.7,
+    "stretch_x": 1.0070000000000001,
+    "stretch_y": 1.01,
+    "stretch_z": 0.85,
     "offset_x": 0.0,
     "offset_y": -10.0,
     "offset_z": 0.0
@@ -32,8 +32,8 @@
     "thickness": 2.0,
     "direction": "inner",
     "inner_ratio": 0.6,
-    "inner_front": 0.6,
-    "inner_rear": 0.6
+    "inner_front": 0.5,
+    "inner_rear": 0.5
   },
   "through_cut": {
     "front_diameter": 0.0,
