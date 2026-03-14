@@ -107,6 +107,16 @@ def main():
         else:
             log("Through-cut: no diameters specified, exporting as-is.")
 
+        # Loose parts を再分離してCleanupリストを更新（貫通カット後の状態を反映）
+        parts_info = _separate_and_list_loose_parts(obj, preview_dir, is_blender4)
+        parts_json_path = os.path.join(preview_dir, "loose_parts.json")
+        with open(parts_json_path, "w", encoding="utf-8") as _pf:
+            json.dump(parts_info, _pf, ensure_ascii=False, indent=2)
+        log(f"Loose parts updated (through_cut): {len(parts_info)} found")
+
+        # 中間ファイルを分離後の状態で保存（Cleanupのremove_partsで名前が一致するように）
+        bpy.ops.wm.save_as_mainfile(filepath=intermediate_path)
+
         _export_main_stl(output_stl, is_blender4)
         log(f"STL exported (through_cut): {output_stl}")
         log("Done.")
@@ -155,6 +165,7 @@ def main():
             bpy.ops.wm.open_mainfile(filepath=intermediate_path)
             _remove_loose_parts_by_name(remove_parts)
             obj = _get_main_object()
+            # ※ intermediate.blend の再保存は loose_parts 分離後に一括して行う（下方）
         else:
             # 中間ファイルがない場合は全処理をやり直す
             log("Intermediate file not found. Reprocessing...")
@@ -259,19 +270,19 @@ def main():
             }, _sf, indent=2)
         log(f"Scale info saved: x={applied_scale_x:.4f} y={applied_scale_y:.4f} z={applied_scale_z:.4f}")
 
-        # ---- 中間ファイル保存 ----
-        intermediate_path = os.path.join(preview_dir, "intermediate.blend")
-        bpy.ops.wm.save_as_mainfile(filepath=intermediate_path)
-
     # ---- Loose parts を分離して一覧出力 ----
     log("Separating loose parts...")
-    parts_info = _separate_and_list_loose_parts(obj, preview_dir)
+    parts_info = _separate_and_list_loose_parts(obj, preview_dir, is_blender4)
 
     # loose_parts.json を出力
     parts_json_path = os.path.join(preview_dir, "loose_parts.json")
     with open(parts_json_path, "w", encoding="utf-8") as f:
         json.dump(parts_info, f, ensure_ascii=False, indent=2)
     log(f"Loose parts: {len(parts_info)} found -> {parts_json_path}")
+
+    # ---- 中間ファイル保存（分離後に保存することでremove_partsで名前が一致する）----
+    intermediate_path = os.path.join(preview_dir, "intermediate.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=intermediate_path)
 
     # ---- STL出力（最大体積のオブジェクトを main body として出力） ----
     result_stl = os.path.join(preview_dir, "result.stl")
@@ -562,10 +573,11 @@ def _cut_bottom(obj, cut_y: float):
         log(f"Warning: Bottom cut boolean failed: {e}")
 
 
-def _separate_and_list_loose_parts(obj, preview_dir: str) -> list:
+def _separate_and_list_loose_parts(obj, preview_dir: str, is_blender4: bool) -> list:
     """
     Loose parts を分離し、体積情報のリストを返す。
     最大体積オブジェクトを main body として残す。
+    各非メインパーツを preview/parts/ に STL として書き出す。
     """
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
@@ -577,18 +589,50 @@ def _separate_and_list_loose_parts(obj, preview_dir: str) -> list:
 
     parts = [o for o in bpy.context.scene.objects if o.type == 'MESH']
 
+    # parts_dir の準備と古い STL のクリア
+    parts_dir = os.path.join(preview_dir, "parts")
+    os.makedirs(parts_dir, exist_ok=True)
+    if os.path.isdir(parts_dir):
+        for _f in os.listdir(parts_dir):
+            if _f.endswith(".stl"):
+                try:
+                    os.remove(os.path.join(parts_dir, _f))
+                except Exception:
+                    pass
+
     # 体積を計算（Blenderはメートル³で返る）
-    parts_info = []
+    parts_with_vol = []
     for part in parts:
         bm = bmesh.new()
         bm.from_mesh(part.data)
         # STLはmm値のままインポートされるため、calc_volume()の戻り値は数値的にmm³
         vol_mm3 = abs(bm.calc_volume())
         bm.free()
-        parts_info.append({"name": part.name, "volume_mm3": round(vol_mm3, 2)})
+        parts_with_vol.append((part, vol_mm3))
 
-    # 体積でソート（昇順）→ UIでは小さい部品が上に表示される
-    parts_info.sort(key=lambda x: x["volume_mm3"])
+    # 体積で昇順ソート → 最後のエントリ（最大体積）がメインボディ
+    parts_with_vol = sorted(parts_with_vol, key=lambda x: x[1])
+
+    parts_info = []
+    loose_idx = 0
+    for i, (part, vol_mm3) in enumerate(parts_with_vol):
+        is_main = (i == len(parts_with_vol) - 1)
+        stl_file = None
+        if not is_main:
+            stl_path = os.path.join(parts_dir, f"part_{loose_idx}.stl")
+            try:
+                _export_object_stl(part, stl_path, is_blender4)
+                stl_file = stl_path
+            except Exception as _e:
+                log(f"Warning: failed to export part STL: {_e}")
+            loose_idx += 1
+        parts_info.append({
+            "name": part.name,
+            "volume_mm3": round(vol_mm3, 2),
+            "is_main": is_main,
+            "stl_file": stl_file,
+        })
+
     return parts_info
 
 
@@ -612,6 +656,34 @@ def _get_main_object() -> bpy.types.Object | None:
         return v
 
     return max(mesh_objects, key=vol)
+
+
+def _export_object_stl(obj, filepath: str, is_blender4: bool):
+    """指定オブジェクトを STL として出力する（_export_main_stl の汎用版）"""
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+
+    if is_blender4:
+        try:
+            bpy.ops.wm.stl_export(
+                filepath=filepath,
+                export_selected_objects=True,
+                global_scale=1.0,
+            )
+            return
+        except Exception:
+            pass
+
+    # Blender 3.x / fallback
+    try:
+        bpy.ops.export_mesh.stl(
+            filepath=filepath,
+            use_selection=True,
+            global_scale=1.0,
+        )
+    except Exception as e:
+        log(f"Warning: STL export for {obj.name} failed: {e}")
 
 
 def _export_main_stl(filepath: str, is_blender4: bool):

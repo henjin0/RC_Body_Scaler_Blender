@@ -13,7 +13,7 @@ import sys
 import threading
 
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
-from PySide6.QtGui import QDoubleValidator
+from PySide6.QtGui import QDoubleValidator, QColor
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -46,6 +46,9 @@ except Exception as _e:
         def start_pick(self, *a): pass
         def set_view_preset(self, *a): pass
         def toggle_projection(self): pass
+        def load_parts(self, *a, **kw): pass
+        def select_part(self, *a): pass
+        def clear_parts(self): pass
 
 try:
     import trimesh as _trimesh
@@ -76,6 +79,22 @@ _LIGHT = {
 }
 THEMES = {"dark": _DARK, "light": _LIGHT}
 _CUR_THEME = "dark"
+
+# ── Part color palette ──────────────────────────────────────────────────────
+_PART_PALETTE = [   # RGBA for vispy renderer
+    (1.00, 0.35, 0.35, 0.85),  # red
+    (0.35, 0.75, 1.00, 0.85),  # sky blue
+    (1.00, 0.80, 0.20, 0.85),  # yellow
+    (0.75, 0.35, 1.00, 0.85),  # purple
+    (0.35, 1.00, 0.55, 0.85),  # green
+    (1.00, 0.55, 0.15, 0.85),  # orange
+    (0.95, 0.45, 0.75, 0.85),  # pink
+    (0.45, 0.95, 0.85, 0.85),  # teal-green
+]
+_PART_QT_COLORS = [   # Matching hex colors for QLabel/list items
+    "#ff5555", "#55aaff", "#ffcc33", "#bb55ff",
+    "#55ff88", "#ff8833", "#f070c0", "#55f0d8",
+]
 
 
 def _build_qss(t: dict) -> str:
@@ -237,6 +256,7 @@ class MainWindow(QMainWindow):
         self._loose_parts: list = []
         self._processing   = False
         self._signals: _WorkerSignals | None = None
+        self._parts_list_loose_indices: list = []  # row → loose part idx mapping
 
         self._renderer = Renderer3D()
         self._active_pick_btn: QPushButton | None = None
@@ -605,6 +625,7 @@ class MainWindow(QMainWindow):
 
         self._parts_list = QListWidget()
         self._parts_list.setFixedHeight(100)
+        self._parts_list.itemSelectionChanged.connect(self._on_part_selection_changed)
         s5.add(self._parts_list)
 
         del_btn = QPushButton("Delete Selected Parts")
@@ -751,6 +772,9 @@ class MainWindow(QMainWindow):
         self._open_btn.style().polish(self._open_btn)
 
         self._clear_result_btn.setVisible(False)
+        self._renderer.clear_parts()
+        self._parts_list.clear()
+        self._parts_list_loose_indices = []
         self._front_axle_y = None
         self._rear_axle_y  = None
         self._result_cut_z = None
@@ -865,6 +889,7 @@ class MainWindow(QMainWindow):
 
     def _clear_result_overlay(self):
         self._renderer.clear_result()
+        self._renderer.clear_parts()
         self._clear_result_btn.setVisible(False)
         self._result_cut_z = None
         self._has_result_displayed = False
@@ -872,6 +897,8 @@ class MainWindow(QMainWindow):
         self._e_thru_front_d.setVisible(False)
         self._e_thru_rear_d.setVisible(False)
         self._thru_btn.setVisible(False)
+        self._parts_list.clear()
+        self._parts_list_loose_indices = []
         self._update_viz()
 
     def _update_wb_label(self):
@@ -971,7 +998,7 @@ class MainWindow(QMainWindow):
 
     # ── Blender process ────────────────────────────────────────────────────
 
-    def _run_process(self, mode: str = "full"):
+    def _run_process(self, mode: str = "full", remove_parts: list | None = None):
         if self._processing:
             return
         if not self._model_path:
@@ -1016,7 +1043,7 @@ class MainWindow(QMainWindow):
             "output_stl":   os.path.join(PREVIEW_DIR, "result.stl"),
             "loose_json":   os.path.join(PREVIEW_DIR, "loose_parts.json"),
             "preview_dir":  PREVIEW_DIR,
-            "remove_parts": [],
+            "remove_parts": remove_parts or [],
         }
 
         os.makedirs(os.path.dirname(PARAMS_PATH), exist_ok=True)
@@ -1100,18 +1127,38 @@ class MainWindow(QMainWindow):
         loose_json = os.path.join(PREVIEW_DIR, "loose_parts.json")
         self._loose_parts = []
         self._parts_list.clear()
+        self._parts_list_loose_indices = []
+        self._renderer.clear_parts()
+        stl_colors: list = []
         if os.path.isfile(loose_json):
             try:
                 with open(loose_json) as f:
                     self._loose_parts = json.load(f)
+                loose_idx = 0
                 for p in self._loose_parts:
-                    self._parts_list.addItem(
-                        QListWidgetItem(
-                            f"{p['name']}  vol: {p.get('volume_mm3', 0):.0f} mm³"
-                        )
+                    is_main = p.get("is_main", False)
+                    vol = p.get("volume_mm3", 0)
+                    prefix = "[MAIN] " if is_main else ""
+                    item = QListWidgetItem(
+                        f"{prefix}{p['name']}  vol: {vol:.0f} mm³"
                     )
+                    if is_main:
+                        item.setForeground(QColor("#888888"))
+                        self._parts_list_loose_indices.append(None)
+                    else:
+                        qt_col = _PART_QT_COLORS[loose_idx % len(_PART_QT_COLORS)]
+                        item.setForeground(QColor(qt_col))
+                        vis_col = _PART_PALETTE[loose_idx % len(_PART_PALETTE)]
+                        stl_path = p.get("stl_file")
+                        if stl_path and os.path.isfile(stl_path):
+                            stl_colors.append((stl_path, vis_col))
+                        self._parts_list_loose_indices.append(loose_idx)
+                        loose_idx += 1
+                    self._parts_list.addItem(item)
             except Exception:
                 pass
+        if self._renderer.available and stl_colors:
+            self._renderer.load_parts(stl_colors)
 
         result_stl = os.path.join(PREVIEW_DIR, "result.stl")
         if self._renderer.available and os.path.isfile(result_stl):
@@ -1131,26 +1178,24 @@ class MainWindow(QMainWindow):
 
     # ── cleanup ────────────────────────────────────────────────────────────
 
+    def _on_part_selection_changed(self):
+        rows = [i.row() for i in self._parts_list.selectedIndexes()]
+        if not rows:
+            self._renderer.select_part(None)
+            return
+        row = rows[0]
+        if row < len(self._parts_list_loose_indices):
+            self._renderer.select_part(self._parts_list_loose_indices[row])
+
     def _delete_parts(self):
         rows = [i.row() for i in self._parts_list.selectedIndexes()]
         if not rows:
             QMessageBox.information(self, "Nothing Selected",
                                     "Select parts in the list to delete.")
             return
-
         to_remove = [self._loose_parts[r]["name"] for r in rows
                      if r < len(self._loose_parts)]
-        try:
-            with open(PARAMS_PATH) as f:
-                params = json.load(f)
-            params["remove_parts"] = to_remove
-            with open(PARAMS_PATH, "w") as f:
-                json.dump(params, f, indent=2)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
-            return
-
-        self._run_btn.click()
+        self._run_process(remove_parts=to_remove)
 
     # ── export ─────────────────────────────────────────────────────────────
 

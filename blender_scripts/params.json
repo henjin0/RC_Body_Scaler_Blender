@@ -1,19 +1,19 @@
 {
   "input_file": "/Users/minoruinoue/Downloads/sedan_fine.stl",
-  "mode": false,
+  "mode": "full",
   "orientation": {
     "rx": 270.0,
     "ry": 180.0,
     "rz": 0.0
   },
   "wheels": {
-    "front_x": 550.6,
-    "rear_x": -539.0,
+    "front_x": 551.6,
+    "rear_x": -537.9,
     "offset_y": 45.0,
     "front_diameter": 300.0,
     "rear_diameter": 300.0,
-    "front_cy": -172.1,
-    "rear_cy": -172.1
+    "front_cy": -169.9,
+    "rear_cy": -171.2
   },
   "wheelbase_target": 83.0,
   "body_target": {
@@ -25,12 +25,14 @@
     "direction": "inner"
   },
   "through_cut": {
-    "front_diameter": 32.0,
-    "rear_diameter": 32.0
+    "front_diameter": 30.0,
+    "rear_diameter": 30.0
   },
-  "cut_z": -186.3,
+  "cut_z": -186.8,
   "output_stl": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/result.stl",
   "loose_json": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/loose_parts.json",
   "preview_dir": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview",
-  "remove_parts": []
+  "remove_parts": [
+    "RCBody.008"
+  ]
 }

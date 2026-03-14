@@ -1,46 +1,8 @@
 [
   {
-    "name": "RCBody.010",
-    "volume_mm3": 0.0
-  },
-  {
-    "name": "RCBody.009",
-    "volume_mm3": 1.23
-  },
-  {
-    "name": "RCBody.003",
-    "volume_mm3": 1.84
-  },
-  {
-    "name": "RCBody.004",
-    "volume_mm3": 2.13
-  },
-  {
-    "name": "RCBody.008",
-    "volume_mm3": 2.16
-  },
-  {
-    "name": "RCBody.006",
-    "volume_mm3": 2.34
-  },
-  {
-    "name": "RCBody.005",
-    "volume_mm3": 616.2
-  },
-  {
-    "name": "RCBody.002",
-    "volume_mm3": 619.03
-  },
-  {
-    "name": "RCBody.001",
-    "volume_mm3": 624.42
-  },
-  {
-    "name": "RCBody.007",
-    "volume_mm3": 626.11
-  },
-  {
     "name": "RCBody",
-    "volume_mm3": 36507.69
+    "volume_mm3": 32462.83,
+    "is_main": true,
+    "stl_file": null
   }
 ]

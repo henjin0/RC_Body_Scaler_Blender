@@ -141,6 +141,9 @@ class Renderer3D:
         self._faces: np.ndarray | None = None
         self._trimesh = None
         self._mode: str = "solid"
+        self._part_data: list = []      # list of (vertices, faces, rgba) or None
+        self._part_vis_list: list = []  # list of vispy visuals or None
+        self._selected_part_idx: int | None = None
 
         self.pick_callback      = None   # fn(x_mm, y_mm, z_mm)
         self.pick_miss_callback = None   # fn() called when click misses mesh
@@ -320,6 +323,70 @@ class Renderer3D:
         self._result_verts = None
         self._result_faces = None
         self._refresh_mesh()
+
+    def load_parts(self, parts: list):
+        """Load loose part STLs as colored overlays.
+        parts: list of (stl_path: str, rgba: tuple)
+        """
+        self.clear_parts()
+        if not HAS_TRIMESH or not self.canvas:
+            return
+        for stl_path, rgba in parts:
+            try:
+                m = _tm.load(stl_path, force="mesh")
+                v = np.array(m.vertices, dtype=np.float32)
+                f = np.array(m.faces, dtype=np.int32)
+                if len(v) == 0:
+                    self._part_data.append(None)
+                    continue
+                ext = v.max(axis=0) - v.min(axis=0)
+                if float(ext.max()) < 10.0:
+                    v *= 1000.0
+                self._part_data.append((v, f, rgba))
+            except Exception as e:
+                print(f"[Renderer] load_parts error: {e}")
+                self._part_data.append(None)
+        self._rebuild_parts()
+
+    def _rebuild_parts(self):
+        for vis in self._part_vis_list:
+            if vis is not None:
+                vis.parent = None
+        self._part_vis_list.clear()
+        if not self.canvas:
+            return
+        for i, data in enumerate(self._part_data):
+            if data is None:
+                self._part_vis_list.append(None)
+                continue
+            v, f, rgba = data
+            # Dim non-selected parts when something is selected
+            if self._selected_part_idx is not None and i != self._selected_part_idx:
+                color = (rgba[0], rgba[1], rgba[2], 0.12)
+            else:
+                color = rgba
+            md = _VMeshData(vertices=v, faces=f)
+            vis = _VMesh(meshdata=md, color=color, shading="smooth", parent=self.view.scene)
+            vis.set_gl_state("translucent", depth_test=True, cull_face=False)
+            self._part_vis_list.append(vis)
+        if self.canvas:
+            self.canvas.update()
+
+    def select_part(self, idx: int | None):
+        """Highlight part at idx (into loose parts list), dim others."""
+        self._selected_part_idx = idx
+        self._rebuild_parts()
+
+    def clear_parts(self):
+        """Remove all part overlays."""
+        for vis in self._part_vis_list:
+            if vis is not None:
+                vis.parent = None
+        self._part_vis_list.clear()
+        self._part_data.clear()
+        self._selected_part_idx = None
+        if self.canvas:
+            self.canvas.update()
 
     def hide_for_processing(self):
         """処理開始時に全メッシュを非表示にする。
@@ -541,11 +608,11 @@ class Renderer3D:
             pass
 
         # ── カットツールボディの可視化 ──────────────────────────────────────
-        # 結果表示中: result_vertsのバウンディングボックスを使い、cut_z_resultを優先
+        # 結果表示中: カットはすでに適用済みなので表示しない
         # 通常時:    元モデルのバウンディングボックスとcut_zを使用
         if self._has_result and self._result_verts is not None:
+            eff_cut_z = None  # 結果モデルにはカット済みなので不要
             vb = self._result_verts
-            eff_cut_z = cut_z_result  # Noneの場合は表示しない
         else:
             vb = v
             eff_cut_z = cut_z
