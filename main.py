@@ -509,19 +509,11 @@ class MainWindow(QMainWindow):
         self._e_offset_y = _NumEntry("Y Offset",    45.0)
         self._e_front_d  = _NumEntry("カット径 前", 52.0)
         self._e_rear_d   = _NumEntry("カット径 後", 52.0)
-        self._e_thru_front_d = _NumEntry("貫通径 前",  0.0)
-        self._e_thru_rear_d  = _NumEntry("貫通径 後",  0.0)
 
         for e in (self._e_front_x, self._e_rear_x, self._e_offset_y,
-                  self._e_front_d, self._e_rear_d,
-                  self._e_thru_front_d, self._e_thru_rear_d):
+                  self._e_front_d, self._e_rear_d):
             s2.add(e)
             e.changed.connect(self._on_param_change)
-
-        _thru_hint = QLabel("貫通径: 04実行後にスケール済み座標で円柱貫通カット\n0 = スキップ")
-        _thru_hint.setStyleSheet("font-size: 10px; color: #4a5568;")
-        _thru_hint.setWordWrap(True)
-        s2.add(_thru_hint)
 
         self._btn_front_x = self._pick_btn("▶ FRONT X", "front_x")
         self._btn_rear_x  = self._pick_btn("▶ REAR X",  "rear_x")
@@ -569,14 +561,6 @@ class MainWindow(QMainWindow):
         self._test_tire_btn.clicked.connect(lambda: self._run_process(mode="tire_cut_only"))
         s4.add(self._test_tire_btn)
 
-        self._thru_btn = QPushButton("⚡  貫通カット 実行")
-        self._thru_btn.setProperty("role", "accent2")
-        self._thru_btn.setFixedHeight(40)
-        self._thru_btn.setEnabled(False)
-        self._thru_btn.setToolTip("04 実行後に有効になります。スケール済み座標で貫通カットを適用します。")
-        self._thru_btn.clicked.connect(lambda: self._run_process(mode="through_cut"))
-        s4.add(self._thru_btn)
-
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)
         self._progress.setVisible(False)
@@ -592,6 +576,27 @@ class MainWindow(QMainWindow):
         self._clear_result_btn.setVisible(False)
         self._clear_result_btn.clicked.connect(self._clear_result_overlay)
         s4.add(self._clear_result_btn)
+
+        # ── 貫通カット（04実行後に表示）────────────────────────────────────
+        self._thru_sep = QLabel("── 貫通カット ──────────────")
+        self._thru_sep.setStyleSheet("font-size: 10px; color: #4a5568; margin-top: 6px;")
+        self._thru_sep.setVisible(False)
+        s4.add(self._thru_sep)
+
+        self._e_thru_front_d = _NumEntry("貫通径 前", 0.0)
+        self._e_thru_rear_d  = _NumEntry("貫通径 後", 0.0)
+        for e in (self._e_thru_front_d, self._e_thru_rear_d):
+            e.setVisible(False)
+            s4.add(e)
+            e.changed.connect(self._on_param_change)
+
+        self._thru_btn = QPushButton("⚡  貫通カット 実行")
+        self._thru_btn.setProperty("role", "accent2")
+        self._thru_btn.setFixedHeight(40)
+        self._thru_btn.setVisible(False)
+        self._thru_btn.setToolTip("スケール済み座標でタイヤ位置に円柱貫通カットを適用します。")
+        self._thru_btn.clicked.connect(lambda: self._run_process(mode="through_cut"))
+        s4.add(self._thru_btn)
 
         lay.addWidget(s4)
 
@@ -863,7 +868,10 @@ class MainWindow(QMainWindow):
         self._clear_result_btn.setVisible(False)
         self._result_cut_z = None
         self._has_result_displayed = False
-        self._thru_btn.setEnabled(False)
+        self._thru_sep.setVisible(False)
+        self._e_thru_front_d.setVisible(False)
+        self._e_thru_rear_d.setVisible(False)
+        self._thru_btn.setVisible(False)
         self._update_viz()
 
     def _update_wb_label(self):
@@ -1018,7 +1026,7 @@ class MainWindow(QMainWindow):
         self._processing = True
         self._run_btn.setEnabled(False)
         self._test_tire_btn.setEnabled(False)
-        self._thru_btn.setEnabled(False)
+        self._thru_btn.setEnabled(False)   # 処理中は無効化（非表示でなくdisable）
         self._clear_result_btn.setVisible(False)
         self._renderer.hide_for_processing()   # 元モデル・結果モデルを非表示
         if mode == "tire_cut_only":
@@ -1060,6 +1068,7 @@ class MainWindow(QMainWindow):
         if code != 0:
             self._renderer.clear_result()   # エラー時は元モデルを再表示
             self._has_result_displayed = False
+            self._thru_btn.setEnabled(True)   # 処理完了で再有効化（非表示のまま）
             self._status_lbl.setStyleSheet("font-size: 12px; color: #ff6b35;")
             self._status_lbl.setText(f"❌ エラーが発生しました (code {code})")
             QMessageBox.critical(
@@ -1080,8 +1089,13 @@ class MainWindow(QMainWindow):
                     self._scale_info = json.load(f)
             except Exception:
                 self._scale_info = {}
-        # 貫通カットボタンは intermediate.blend が存在する場合のみ有効化
-        self._thru_btn.setEnabled(os.path.isfile(intermediate_path))
+        # 貫通カットセクションは intermediate.blend が存在する場合のみ表示
+        has_intermediate = os.path.isfile(intermediate_path)
+        self._thru_sep.setVisible(has_intermediate)
+        self._e_thru_front_d.setVisible(has_intermediate)
+        self._e_thru_rear_d.setVisible(has_intermediate)
+        self._thru_btn.setVisible(has_intermediate)
+        self._thru_btn.setEnabled(True)
 
         loose_json = os.path.join(PREVIEW_DIR, "loose_parts.json")
         self._loose_parts = []
