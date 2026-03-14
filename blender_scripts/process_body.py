@@ -225,24 +225,29 @@ def main():
                 bpy.context.view_layer.objects.active = obj
                 bpy.ops.object.transform_apply(scale=True)
 
-        # ---- 中空化前のメッシュ修復 ----
-        log("Repairing mesh before hollow boolean...")
+        # ---- メッシュ修復 ----
+        log("Repairing mesh...")
         _repair_mesh(obj)
 
-        # ---- 中空化（内側縮小コピーのブーリアン差分） ----
-        # スケール完了後・タイヤカット前に実施する。
-        # タイヤカット後に中空化するとホイールハウス内側に余分な壁が残るため。
-        # Solidifyモディファイアではなく、バウンディングボックス中心まわりに
-        # (outer - 2*thickness) / outer でスケールした内側コピーを差し引く。
-        # 各軸の壁厚 ≈ thickness mm（平坦面では厳密に一致）。
-        thickness = solidify_params["thickness"]   # mm
-        log(f"Hollow Boolean: thickness={thickness}mm")
-        _hollow_boolean(obj, thickness)
-
-        # ---- タイヤ除去 ----
-        # 中空化後にタイヤカットすることで、ホイールハウス内側の余分な壁を防ぐ。
-        log("Removing tires (boolean subtract)...")
-        _remove_tires(obj, wheels)
+        # ---- タイヤ除去（ソリッドモデルに対して先に実施）----
+        # ソリッド状態でタイヤカットしてから中空化することで Boolean が安定し、
+        # ホイールハウス内側に余分な壁も生じない。
+        # スケール適用後のモデル座標に合わせて座標値を補正してから渡す。
+        log("Removing tires (boolean subtract on solid)...")
+        scaled_wheels = dict(wheels)
+        scaled_wheels["front_x"]        = wheels["front_x"]        * applied_scale_x
+        scaled_wheels["rear_x"]         = wheels["rear_x"]         * applied_scale_x
+        scaled_wheels["offset_y"]       = wheels["offset_y"]       * applied_scale_z
+        scaled_wheels["front_diameter"] = wheels["front_diameter"] * applied_scale_x
+        scaled_wheels["rear_diameter"]  = wheels["rear_diameter"]  * applied_scale_x
+        if wheels.get("front_cy") is not None:
+            scaled_wheels["front_cy"] = wheels["front_cy"] * applied_scale_y
+        if wheels.get("rear_cy") is not None:
+            scaled_wheels["rear_cy"]  = wheels["rear_cy"]  * applied_scale_y
+        log(f"  scaled front_x={scaled_wheels['front_x']:.1f}  rear_x={scaled_wheels['rear_x']:.1f}"
+            f"  offset_y={scaled_wheels['offset_y']:.1f}"
+            f"  front_d={scaled_wheels['front_diameter']:.1f}  rear_d={scaled_wheels['rear_diameter']:.1f}")
+        _remove_tires(obj, scaled_wheels)
 
         if mode == "tire_cut_only":
             log("mode=tire_cut_only: スケール後・中空化後のタイヤカット結果を出力します")
@@ -251,6 +256,13 @@ def main():
             log(f"STL exported (tire_cut_only): {result_stl}")
             log("Done.")
             sys.exit(0)
+
+        # ---- 中空化（タイヤカット済みソリッドに対して実施）----
+        # タイヤカット後のソリッドを内側縮小コピーとの差分で中空化する。
+        # タイヤホール形状が内側シェルにも反映されるため余分な壁が生じない。
+        thickness = solidify_params["thickness"]   # mm
+        log(f"Hollow Boolean: thickness={thickness}mm")
+        _hollow_boolean(obj, thickness)
 
         # ---- ボディ下部カット ----
         # cut_z_mm は処理前モデルのvispy Y座標（= Blender Y値）。
@@ -480,9 +492,12 @@ def _remove_tires(obj, wheels: dict):
     rear_r  = wheels["rear_diameter"]  / 2.0
 
     # タイヤ中心Y: UIでクリックした位置（vispy Y = Blender Y値）を優先。
-    # 未設定の場合はバウンディングボックスの最小Y + タイヤ半径で自動推定。
+    # 未設定の場合はモデル高さの30%（底面から）を自動推定。
+    # ※タイヤ半径で推定するとスケール後に半径>>モデル高さになる場合があるため高さ比率を使用。
     bbox_corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
-    auto_y = min(v.y for v in bbox_corners) + max(front_r, rear_r)
+    min_y = min(v.y for v in bbox_corners)
+    max_y = max(v.y for v in bbox_corners)
+    auto_y = min_y + (max_y - min_y) * 0.30
 
     raw_front_cy = wheels.get("front_cy")
     raw_rear_cy  = wheels.get("rear_cy")

@@ -15,7 +15,7 @@ import threading
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QDoubleValidator, QColor
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QGroupBox,
+    QAbstractItemView, QApplication, QFileDialog, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QMessageBox, QProgressBar, QPushButton,
     QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget,
@@ -48,6 +48,7 @@ except Exception as _e:
         def toggle_projection(self): pass
         def load_parts(self, *a, **kw): pass
         def select_part(self, *a): pass
+        def select_parts(self, *a): pass
         def clear_parts(self): pass
 
 try:
@@ -175,6 +176,7 @@ class _NumEntry(QWidget):
     def __init__(self, label: str, default: float, unit: str = "mm",
                  lo: float = -9999.0, hi: float = 9999.0):
         super().__init__()
+        self._default = default
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
@@ -210,6 +212,9 @@ class _NumEntry(QWidget):
 
     def set(self, v: float):
         self._edit.setText(f"{v:.1f}")
+
+    def reset(self):
+        self._edit.setText(str(self._default))
 
 
 class _Section(QGroupBox):
@@ -565,6 +570,12 @@ class MainWindow(QMainWindow):
 
         self._btn_cut_z = self._pick_btn("▶ PICK CUT Z", "cut_z")
         s3.add(self._btn_cut_z)
+
+        reset_btn = QPushButton("⟳  パラメータをリセット")
+        reset_btn.setProperty("role", "accent2")
+        reset_btn.clicked.connect(self._reset_params)
+        s3.add(reset_btn)
+
         lay.addWidget(s3)
 
         # ── 04 Execute ────────────────────────────────────────────────────
@@ -624,14 +635,21 @@ class MainWindow(QMainWindow):
         s5 = _Section("05  CLEANUP")
 
         self._parts_list = QListWidget()
-        self._parts_list.setFixedHeight(100)
+        self._parts_list.setFixedHeight(120)
+        self._parts_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._parts_list.itemSelectionChanged.connect(self._on_part_selection_changed)
         s5.add(self._parts_list)
 
-        del_btn = QPushButton("Delete Selected Parts")
+        del_btn = QPushButton("🗑  選択パーツを削除")
         del_btn.setProperty("role", "accent2")
         del_btn.clicked.connect(self._delete_parts)
         s5.add(del_btn)
+
+        auto_del_btn = QPushButton("⚡  MAIN以外を全削除")
+        auto_del_btn.setProperty("role", "accent2")
+        auto_del_btn.setToolTip("体積が最大のオブジェクト（メインボディ）以外をすべて削除します")
+        auto_del_btn.clicked.connect(self._delete_all_non_main)
+        s5.add(auto_del_btn)
 
         lay.addWidget(s5)
 
@@ -904,6 +922,22 @@ class MainWindow(QMainWindow):
     def _update_wb_label(self):
         wb = abs(self._e_front_x.get() - self._e_rear_x.get())
         self._wb_lbl.setText(f"現在のWB: {wb:.1f} mm")
+
+    def _reset_params(self):
+        """全パラメータをデフォルト値にリセットする"""
+        for e in (
+            self._e_rot_x, self._e_rot_y, self._e_rot_z,
+            self._e_front_x, self._e_rear_x, self._e_offset_y,
+            self._e_front_d, self._e_rear_d,
+            self._e_wheelbase, self._e_body_width, self._e_body_height,
+            self._e_thickness, self._e_cut_z,
+            self._e_thru_front_d, self._e_thru_rear_d,
+        ):
+            e.reset()
+        self._front_axle_y = None
+        self._rear_axle_y  = None
+        self._result_cut_z = None
+        self._update_viz()
 
     # ── 3D picking ─────────────────────────────────────────────────────────
 
@@ -1181,11 +1215,15 @@ class MainWindow(QMainWindow):
     def _on_part_selection_changed(self):
         rows = [i.row() for i in self._parts_list.selectedIndexes()]
         if not rows:
-            self._renderer.select_part(None)
+            self._renderer.select_parts(set())
             return
-        row = rows[0]
-        if row < len(self._parts_list_loose_indices):
-            self._renderer.select_part(self._parts_list_loose_indices[row])
+        idxs = set()
+        for row in rows:
+            if row < len(self._parts_list_loose_indices):
+                idx = self._parts_list_loose_indices[row]
+                if idx is not None:
+                    idxs.add(idx)
+        self._renderer.select_parts(idxs)
 
     def _delete_parts(self):
         rows = [i.row() for i in self._parts_list.selectedIndexes()]
@@ -1195,6 +1233,15 @@ class MainWindow(QMainWindow):
             return
         to_remove = [self._loose_parts[r]["name"] for r in rows
                      if r < len(self._loose_parts)]
+        self._run_process(remove_parts=to_remove)
+
+    def _delete_all_non_main(self):
+        """体積最大（メイン）以外のパーツをすべて削除する"""
+        to_remove = [p["name"] for p in self._loose_parts if not p.get("is_main", False)]
+        if not to_remove:
+            QMessageBox.information(self, "Nothing to Delete",
+                                    "削除可能な非メインパーツが見つかりません。")
+            return
         self._run_process(remove_parts=to_remove)
 
     # ── export ─────────────────────────────────────────────────────────────

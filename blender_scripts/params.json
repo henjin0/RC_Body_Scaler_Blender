@@ -1,38 +1,36 @@
 {
-  "input_file": "/Users/minoruinoue/Downloads/sedan_fine.stl",
-  "mode": "full",
+  "input_file": "/Users/minoruinoue/Desktop/Meshy_AI_Blue_Vintage_Meal_Tra_0314103845_generate.stl",
+  "mode": false,
   "orientation": {
     "rx": 270.0,
     "ry": 180.0,
     "rz": 0.0
   },
   "wheels": {
-    "front_x": 551.6,
-    "rear_x": -537.9,
+    "front_x": 533.7,
+    "rear_x": -540.1,
     "offset_y": 45.0,
-    "front_diameter": 300.0,
-    "rear_diameter": 300.0,
-    "front_cy": -169.9,
-    "rear_cy": -171.2
+    "front_diameter": 350.0,
+    "rear_diameter": 350.0,
+    "front_cy": -156.4,
+    "rear_cy": -161.4
   },
   "wheelbase_target": 83.0,
   "body_target": {
-    "width_mm": 65.0,
-    "height_mm": 55.0
+    "width_mm": 70.0,
+    "height_mm": 50.0
   },
   "solidify": {
-    "thickness": 2.5,
+    "thickness": 2.0,
     "direction": "inner"
   },
   "through_cut": {
-    "front_diameter": 30.0,
-    "rear_diameter": 30.0
+    "front_diameter": 0.0,
+    "rear_diameter": 0.0
   },
-  "cut_z": -186.8,
+  "cut_z": -230.0,
   "output_stl": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/result.stl",
   "loose_json": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/loose_parts.json",
   "preview_dir": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview",
-  "remove_parts": [
-    "RCBody.008"
-  ]
+  "remove_parts": []
 }

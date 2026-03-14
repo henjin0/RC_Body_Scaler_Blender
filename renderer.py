@@ -143,7 +143,7 @@ class Renderer3D:
         self._mode: str = "solid"
         self._part_data: list = []      # list of (vertices, faces, rgba) or None
         self._part_vis_list: list = []  # list of vispy visuals or None
-        self._selected_part_idx: int | None = None
+        self._selected_part_idxs: set = set()
 
         self.pick_callback      = None   # fn(x_mm, y_mm, z_mm)
         self.pick_miss_callback = None   # fn() called when click misses mesh
@@ -361,7 +361,7 @@ class Renderer3D:
                 continue
             v, f, rgba = data
             # Dim non-selected parts when something is selected
-            if self._selected_part_idx is not None and i != self._selected_part_idx:
+            if self._selected_part_idxs and i not in self._selected_part_idxs:
                 color = (rgba[0], rgba[1], rgba[2], 0.12)
             else:
                 color = rgba
@@ -374,7 +374,12 @@ class Renderer3D:
 
     def select_part(self, idx: int | None):
         """Highlight part at idx (into loose parts list), dim others."""
-        self._selected_part_idx = idx
+        self._selected_part_idxs = {idx} if idx is not None else set()
+        self._rebuild_parts()
+
+    def select_parts(self, idxs: set):
+        """Highlight multiple parts, dim others."""
+        self._selected_part_idxs = idxs
         self._rebuild_parts()
 
     def clear_parts(self):
@@ -384,7 +389,7 @@ class Renderer3D:
                 vis.parent = None
         self._part_vis_list.clear()
         self._part_data.clear()
-        self._selected_part_idx = None
+        self._selected_part_idxs = set()
         if self.canvas:
             self.canvas.update()
 
@@ -527,8 +532,8 @@ class Renderer3D:
             (disp_rear_x,  rear_cut_r,  thru_rear_r,  cy_rear,  "#ff6b35", "REAR"),
         ]
         for x, cut_r, thru_r, cy, col, tag in axle_specs:
-            # カット径（黄色）— 結果表示中は非表示
-            if cut_r is not None and not result_shown:
+            # カット径（黄色）
+            if cut_r is not None:
                 vvc, ffc = _cylinder_mesh_z(x, cy, model_z_ctr, cut_r, model_z_half)
                 visc = _VMesh(
                     vertices=vvc, faces=ffc,
@@ -555,7 +560,7 @@ class Renderer3D:
                           cut_r  if cut_r  is not None else 26.0)
                 lbl_pos = np.array([x, cy + lbl_r + 10, model_z_ctr], dtype=np.float32)
                 lbl_txt = tag
-                if cut_r is not None and not result_shown:
+                if cut_r is not None:
                     lbl_txt += f"  Cut:{cut_r*2:.0f}mm"
                 if thru_r is not None and thru_r > 0:
                     lbl_txt += f"  貫通:{thru_r*2:.0f}mm"
