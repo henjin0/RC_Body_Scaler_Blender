@@ -145,6 +145,17 @@ class Renderer3D:
         self._part_vis_list: list = []  # list of vispy visuals or None
         self._selected_part_idxs: set = set()
 
+        self._thickness_preview: float | None = None  # 内側シェルプレビュー用肉厚
+        self._inner_shell_ratio: float = 1.0          # 内側シェル高さ比率 (0-1)
+        self._inner_shell_front: float = 1.0          # 内側シェル前方比率 (0-1)
+        self._inner_shell_rear:  float = 1.0          # 内側シェル後方比率 (0-1)
+        self._inner_shell_vis = None                   # 内側シェルビジュアル
+        self._show_outer_shell: bool = True            # 外側シェル表示フラグ
+        self._show_inner_shell: bool = True            # 内側シェル表示フラグ
+
+        self._stretch: np.ndarray = np.ones(3, dtype=np.float32)   # X/Y/Z 伸縮率
+        self._offset:  np.ndarray = np.zeros(3, dtype=np.float32)  # X/Y/Z オフセット
+
         self.pick_callback      = None   # fn(x_mm, y_mm, z_mm)
         self.pick_miss_callback = None   # fn() called when click misses mesh
         self._pick_active       = False
@@ -246,6 +257,10 @@ class Renderer3D:
             print(f"[Renderer] load error: mesh has no vertices: {filepath}")
             return {}
 
+        # 縮退面（頂点インデックス重複）を numpy で除去
+        valid = (f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])
+        f = f[valid]
+
         # Unit detection: if max extent < 10 assume meters → convert to mm
         ext = v.max(axis=0) - v.min(axis=0)
         if float(ext.max()) < 10.0:
@@ -275,11 +290,12 @@ class Renderer3D:
         self._update_orient_vis()
 
         return {
-            "X_mm": float(ext[0]),
-            "Y_mm": float(ext[1]),
-            "Z_mm": float(ext[2]),
-            "faces": len(f),
-            "verts": len(v),
+            "X_mm":     float(ext[0]),
+            "Y_mm":     float(ext[1]),
+            "Z_mm":     float(ext[2]),
+            "Y_min_mm": float(v[:, 1].min()),
+            "faces":    len(f),
+            "verts":    len(v),
         }
 
     def load_result(self, filepath: str) -> dict:
@@ -298,6 +314,9 @@ class Renderer3D:
         if len(v) == 0:
             print(f"[Renderer] load_result: mesh has no vertices: {filepath}")
             return {}
+
+        valid = (f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])
+        f = f[valid]
 
         ext = v.max(axis=0) - v.min(axis=0)
         if float(ext.max()) < 10.0:
@@ -437,6 +456,47 @@ class Renderer3D:
             self._mode = mode
             self._refresh_mesh()
 
+    def set_thickness_preview(self, thickness: float | None):
+        """Execute前プレビュー: 肉厚分縮小した内側シェルを半透明で表示する。
+        結果表示中は None を渡すと非表示になる。"""
+        self._thickness_preview = thickness
+        self._refresh_mesh()
+
+    def set_inner_shell_ratio(self, ratio: float):
+        """内側シェルの高さ比率を設定する (0.0–1.0)。1.0=フル、0.5=下半分のみ。"""
+        self._inner_shell_ratio = max(0.0, min(1.0, ratio))
+        self._refresh_mesh()
+
+    def set_inner_shell_front(self, ratio: float):
+        """内側シェルの前方比率 (0.0–1.0)。1.0=前端まで、0.5=中心から前半の半分まで。"""
+        self._inner_shell_front = max(0.0, min(1.0, ratio))
+        self._refresh_mesh()
+
+    def set_inner_shell_rear(self, ratio: float):
+        """内側シェルの後方比率 (0.0–1.0)。1.0=後端まで、0.5=中心から後半の半分まで。"""
+        self._inner_shell_rear = max(0.0, min(1.0, ratio))
+        self._refresh_mesh()
+
+    def set_outer_shell_visible(self, visible: bool):
+        """外側シェル（元モデル）の表示/非表示を切り替える。"""
+        self._show_outer_shell = visible
+        self._refresh_mesh()
+
+    def set_inner_shell_visible(self, visible: bool):
+        """内側シェル（肉厚プレビュー）の表示/非表示を切り替える。"""
+        self._show_inner_shell = visible
+        self._refresh_mesh()
+
+    def set_body_stretch(self, sx: float, sy: float, sz: float):
+        """Execute前プレビュー: 重心基準でモデルを X/Y/Z に伸縮する (1.0=変化なし)。"""
+        self._stretch = np.array([sx, sy, sz], dtype=np.float32)
+        self._refresh_mesh()
+
+    def set_body_offset(self, ox: float, oy: float, oz: float):
+        """Execute前プレビュー: モデルを X/Y/Z 方向に平行移動する (0=変化なし)。"""
+        self._offset = np.array([ox, oy, oz], dtype=np.float32)
+        self._refresh_mesh()
+
     def _refresh_mesh(self):
         if not self.canvas:
             return
@@ -446,12 +506,25 @@ class Renderer3D:
         if self._result_mesh_vis is not None:
             self._result_mesh_vis.parent = None
             self._result_mesh_vis = None
+        if self._inner_shell_vis is not None:
+            self._inner_shell_vis.parent = None
+            self._inner_shell_vis = None
         if self._verts is None:
             return
 
         v, f  = self._verts, self._faces
-        md    = _VMeshData(vertices=v, faces=f)
         scene = self.view.scene
+
+        # 外側メッシュは常にオリジナル頂点で表示（stretch/offset の影響を受けない）
+        md = _VMeshData(vertices=v, faces=f)
+
+        # 内側シェル用: stretch + offset を適用した頂点（外側表示には使わない）
+        if (not self._has_result and
+                (np.any(self._stretch != 1.0) or np.any(self._offset != 0.0))):
+            ctr    = v.mean(axis=0)
+            v_disp = ((v - ctr) * self._stretch + ctr + self._offset).astype(np.float32)
+        else:
+            v_disp = v
 
         if self._has_result and self._result_verts is not None:
             # 結果モデルのみ表示（元モデルは非表示）
@@ -461,21 +534,77 @@ class Renderer3D:
             rvis.set_gl_state("opaque", depth_test=True, cull_face=False)
             self._result_mesh_vis = rvis
 
-        elif self._mode == "wireframe":
-            vis = _VMesh(meshdata=md, color=(0.0, 0.9, 1.0, 0.85),
-                         mode="lines", parent=scene)
-            self._mesh_vis = vis
+        elif self._show_outer_shell:
+            if self._mode == "wireframe":
+                vis = _VMesh(meshdata=md, color=(0.0, 0.9, 1.0, 0.85),
+                             mode="lines", parent=scene)
+                self._mesh_vis = vis
 
-        elif self._mode == "transparent":
-            vis = _VMesh(meshdata=md, color=(0.47, 0.56, 0.61, 0.30),
-                         shading="smooth", parent=scene)
-            vis.set_gl_state("translucent", depth_test=True, cull_face=False)
-            self._mesh_vis = vis
+            elif self._mode == "transparent":
+                vis = _VMesh(meshdata=md, color=(0.47, 0.56, 0.61, 0.30),
+                             shading="smooth", parent=scene)
+                vis.set_gl_state("translucent", depth_test=True, cull_face=False)
+                self._mesh_vis = vis
 
-        else:  # solid
-            vis = _VMesh(meshdata=md, color=(0.47, 0.56, 0.61, 1.0),
-                         shading="smooth", parent=scene)
-            self._mesh_vis = vis
+            else:  # solid
+                vis = _VMesh(meshdata=md, color=(0.47, 0.56, 0.61, 1.0),
+                             shading="smooth", parent=scene)
+                self._mesh_vis = vis
+
+        # ── 内側シェルプレビュー (Execute前 + result未表示 + 肉厚指定時 + 表示ON) ──
+        t = self._thickness_preview
+        if (self._show_inner_shell and
+                not self._has_result and
+                t is not None and t > 0 and v is not None):
+            # stretch/offset 済みの表示用頂点を基準にする
+            bbox_min = v_disp.min(axis=0)
+            bbox_max = v_disp.max(axis=0)
+            dims = bbox_max - bbox_min
+            # 各軸の縮小スケール (_hollow_boolean と同じ計算)
+            if np.all(dims > 4 * t):
+                scales = (dims - 2 * t) / dims
+                ctr = (bbox_min + bbox_max) / 2.0
+                v_inner = ((v_disp - ctr) * scales + ctr).astype(np.float32)
+
+                # カット比率に合わせて表示する面をフィルタリング
+                # (上部・前方・後方の3方向、_hollow_boolean の keep-box と同じ論理)
+                ratio = self._inner_shell_ratio
+                front = self._inner_shell_front
+                rear  = self._inner_shell_rear
+                x_mid = float((bbox_min[0] + bbox_max[0]) / 2.0)
+
+                keep = np.ones(len(f), dtype=bool)
+
+                if ratio < 1.0:
+                    cut_y = float(bbox_min[1]) + ratio * float(dims[1])
+                    keep &= np.all(v_inner[:, 1][f] <= cut_y, axis=1)
+
+                if front < 1.0:
+                    front_cut_x = x_mid + front * (float(bbox_max[0]) - x_mid)
+                    keep &= np.all(v_inner[:, 0][f] <= front_cut_x, axis=1)
+
+                if rear < 1.0:
+                    rear_cut_x = x_mid - rear * (x_mid - float(bbox_min[0]))
+                    keep &= np.all(v_inner[:, 0][f] >= rear_cut_x, axis=1)
+
+                if keep.any():
+                    f_cut  = f[keep]
+                    used   = np.unique(f_cut)
+                    remap  = np.zeros(len(v_inner), dtype=np.int32)
+                    remap[used] = np.arange(len(used), dtype=np.int32)
+                    v_inner_d = v_inner[used]
+                    f_inner_d = remap[f_cut]
+                else:
+                    v_inner_d, f_inner_d = v_inner, f
+
+                md_inner = _VMeshData(vertices=v_inner_d, faces=f_inner_d)
+                inner_vis = _VMesh(
+                    meshdata=md_inner,
+                    color=(1.0, 0.55, 0.10, 0.40),   # 半透明オレンジ
+                    shading="smooth", parent=scene,
+                )
+                inner_vis.set_gl_state("translucent", depth_test=True, cull_face=False)
+                self._inner_shell_vis = inner_vis
 
         # 描画を強制更新
         self.canvas.update()
@@ -532,8 +661,8 @@ class Renderer3D:
             (disp_rear_x,  rear_cut_r,  thru_rear_r,  cy_rear,  "#ff6b35", "REAR"),
         ]
         for x, cut_r, thru_r, cy, col, tag in axle_specs:
-            # カット径（黄色）
-            if cut_r is not None:
+            # カット径（黄色）— 結果表示中は非表示（モデルに重なって見えなくなるため）
+            if cut_r is not None and not result_shown:
                 vvc, ffc = _cylinder_mesh_z(x, cy, model_z_ctr, cut_r, model_z_half)
                 visc = _VMesh(
                     vertices=vvc, faces=ffc,
@@ -560,7 +689,7 @@ class Renderer3D:
                           cut_r  if cut_r  is not None else 26.0)
                 lbl_pos = np.array([x, cy + lbl_r + 10, model_z_ctr], dtype=np.float32)
                 lbl_txt = tag
-                if cut_r is not None:
+                if cut_r is not None and not result_shown:
                     lbl_txt += f"  Cut:{cut_r*2:.0f}mm"
                 if thru_r is not None and thru_r > 0:
                     lbl_txt += f"  貫通:{thru_r*2:.0f}mm"

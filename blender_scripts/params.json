@@ -7,28 +7,39 @@
     "rz": 0.0
   },
   "wheels": {
-    "front_x": 533.7,
-    "rear_x": -540.1,
+    "front_x": 536.0,
+    "rear_x": -538.8,
     "offset_y": 45.0,
     "front_diameter": 350.0,
     "rear_diameter": 350.0,
-    "front_cy": -156.4,
-    "rear_cy": -161.4
+    "front_cy": -152.6,
+    "rear_cy": -158.5
   },
   "wheelbase_target": 83.0,
   "body_target": {
-    "width_mm": 70.0,
+    "width_mm": 65.0,
     "height_mm": 50.0
+  },
+  "shape": {
+    "stretch_x": 1.0,
+    "stretch_y": 1.0,
+    "stretch_z": 0.7,
+    "offset_x": 0.0,
+    "offset_y": -10.0,
+    "offset_z": 0.0
   },
   "solidify": {
     "thickness": 2.0,
-    "direction": "inner"
+    "direction": "inner",
+    "inner_ratio": 0.6,
+    "inner_front": 0.6,
+    "inner_rear": 0.6
   },
   "through_cut": {
     "front_diameter": 0.0,
     "rear_diameter": 0.0
   },
-  "cut_z": -230.0,
+  "cut_z": -506.5,
   "output_stl": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/result.stl",
   "loose_json": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/loose_parts.json",
   "preview_dir": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview",

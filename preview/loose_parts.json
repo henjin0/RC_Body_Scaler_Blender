@@ -1,7 +1,445 @@
 [
   {
+    "name": "RCBody.064",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_0.stl"
+  },
+  {
+    "name": "RCBody.067",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_1.stl"
+  },
+  {
+    "name": "RCBody.069",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_2.stl"
+  },
+  {
+    "name": "RCBody.063",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_3.stl"
+  },
+  {
+    "name": "RCBody.066",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_4.stl"
+  },
+  {
+    "name": "RCBody.068",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_5.stl"
+  },
+  {
+    "name": "RCBody.030",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_6.stl"
+  },
+  {
+    "name": "RCBody.070",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_7.stl"
+  },
+  {
+    "name": "RCBody.065",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_8.stl"
+  },
+  {
+    "name": "RCBody.071",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_9.stl"
+  },
+  {
+    "name": "RCBody.072",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_10.stl"
+  },
+  {
+    "name": "RCBody.035",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_11.stl"
+  },
+  {
+    "name": "RCBody.008",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_12.stl"
+  },
+  {
+    "name": "RCBody.018",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_13.stl"
+  },
+  {
+    "name": "RCBody.073",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_14.stl"
+  },
+  {
+    "name": "RCBody.061",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_15.stl"
+  },
+  {
+    "name": "RCBody.017",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_16.stl"
+  },
+  {
+    "name": "RCBody.029",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_17.stl"
+  },
+  {
+    "name": "RCBody.057",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_18.stl"
+  },
+  {
+    "name": "RCBody.036",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_19.stl"
+  },
+  {
+    "name": "RCBody.027",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_20.stl"
+  },
+  {
+    "name": "RCBody.009",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_21.stl"
+  },
+  {
+    "name": "RCBody.048",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_22.stl"
+  },
+  {
+    "name": "RCBody.003",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_23.stl"
+  },
+  {
+    "name": "RCBody.016",
+    "volume_mm3": 0.0,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_24.stl"
+  },
+  {
+    "name": "RCBody.025",
+    "volume_mm3": 0.01,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_25.stl"
+  },
+  {
+    "name": "RCBody.006",
+    "volume_mm3": 0.01,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_26.stl"
+  },
+  {
+    "name": "RCBody.058",
+    "volume_mm3": 0.01,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_27.stl"
+  },
+  {
+    "name": "RCBody.055",
+    "volume_mm3": 0.01,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_28.stl"
+  },
+  {
+    "name": "RCBody.019",
+    "volume_mm3": 0.01,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_29.stl"
+  },
+  {
+    "name": "RCBody.001",
+    "volume_mm3": 0.02,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_30.stl"
+  },
+  {
+    "name": "RCBody.046",
+    "volume_mm3": 0.02,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_31.stl"
+  },
+  {
+    "name": "RCBody.054",
+    "volume_mm3": 0.02,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_32.stl"
+  },
+  {
+    "name": "RCBody.023",
+    "volume_mm3": 0.02,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_33.stl"
+  },
+  {
+    "name": "RCBody.005",
+    "volume_mm3": 0.02,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_34.stl"
+  },
+  {
+    "name": "RCBody.053",
+    "volume_mm3": 0.02,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_35.stl"
+  },
+  {
+    "name": "RCBody.038",
+    "volume_mm3": 0.04,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_36.stl"
+  },
+  {
+    "name": "RCBody.031",
+    "volume_mm3": 0.08,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_37.stl"
+  },
+  {
+    "name": "RCBody.004",
+    "volume_mm3": 0.1,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_38.stl"
+  },
+  {
+    "name": "RCBody.037",
+    "volume_mm3": 0.11,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_39.stl"
+  },
+  {
+    "name": "RCBody.028",
+    "volume_mm3": 0.21,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_40.stl"
+  },
+  {
+    "name": "RCBody.052",
+    "volume_mm3": 0.24,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_41.stl"
+  },
+  {
+    "name": "RCBody.034",
+    "volume_mm3": 0.24,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_42.stl"
+  },
+  {
+    "name": "RCBody.007",
+    "volume_mm3": 0.25,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_43.stl"
+  },
+  {
+    "name": "RCBody.059",
+    "volume_mm3": 0.37,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_44.stl"
+  },
+  {
+    "name": "RCBody.060",
+    "volume_mm3": 0.48,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_45.stl"
+  },
+  {
+    "name": "RCBody.022",
+    "volume_mm3": 0.53,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_46.stl"
+  },
+  {
+    "name": "RCBody.039",
+    "volume_mm3": 0.54,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_47.stl"
+  },
+  {
+    "name": "RCBody.050",
+    "volume_mm3": 0.69,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_48.stl"
+  },
+  {
+    "name": "RCBody.040",
+    "volume_mm3": 0.75,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_49.stl"
+  },
+  {
+    "name": "RCBody.047",
+    "volume_mm3": 1.79,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_50.stl"
+  },
+  {
+    "name": "RCBody.033",
+    "volume_mm3": 3.56,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_51.stl"
+  },
+  {
+    "name": "RCBody.015",
+    "volume_mm3": 3.92,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_52.stl"
+  },
+  {
+    "name": "RCBody.051",
+    "volume_mm3": 4.66,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_53.stl"
+  },
+  {
+    "name": "RCBody.044",
+    "volume_mm3": 6.36,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_54.stl"
+  },
+  {
+    "name": "RCBody.014",
+    "volume_mm3": 8.12,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_55.stl"
+  },
+  {
+    "name": "RCBody.013",
+    "volume_mm3": 8.93,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_56.stl"
+  },
+  {
+    "name": "RCBody.021",
+    "volume_mm3": 8.96,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_57.stl"
+  },
+  {
+    "name": "RCBody.024",
+    "volume_mm3": 20.91,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_58.stl"
+  },
+  {
+    "name": "RCBody.010",
+    "volume_mm3": 21.34,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_59.stl"
+  },
+  {
+    "name": "RCBody.002",
+    "volume_mm3": 22.99,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_60.stl"
+  },
+  {
+    "name": "RCBody.062",
+    "volume_mm3": 23.76,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_61.stl"
+  },
+  {
+    "name": "RCBody.045",
+    "volume_mm3": 28.33,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_62.stl"
+  },
+  {
+    "name": "RCBody.032",
+    "volume_mm3": 28.7,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_63.stl"
+  },
+  {
+    "name": "RCBody.011",
+    "volume_mm3": 39.8,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_64.stl"
+  },
+  {
+    "name": "RCBody.056",
+    "volume_mm3": 49.71,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_65.stl"
+  },
+  {
+    "name": "RCBody.012",
+    "volume_mm3": 100.31,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_66.stl"
+  },
+  {
+    "name": "RCBody.043",
+    "volume_mm3": 192.37,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_67.stl"
+  },
+  {
+    "name": "RCBody.020",
+    "volume_mm3": 269.87,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_68.stl"
+  },
+  {
+    "name": "RCBody.049",
+    "volume_mm3": 295.07,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_69.stl"
+  },
+  {
+    "name": "RCBody.026",
+    "volume_mm3": 410.23,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_70.stl"
+  },
+  {
+    "name": "RCBody.042",
+    "volume_mm3": 798.87,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_71.stl"
+  },
+  {
+    "name": "RCBody.041",
+    "volume_mm3": 819.25,
+    "is_main": false,
+    "stl_file": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/parts/part_72.stl"
+  },
+  {
     "name": "RCBody",
-    "volume_mm3": 34478.91,
+    "volume_mm3": 47586.33,
     "is_main": true,
     "stl_file": null
   }

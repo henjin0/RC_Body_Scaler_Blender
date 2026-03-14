@@ -15,7 +15,7 @@ import threading
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QDoubleValidator, QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QFileDialog, QGroupBox,
+    QAbstractItemView, QApplication, QCheckBox, QFileDialog, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QMessageBox, QProgressBar, QPushButton,
     QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget,
@@ -50,6 +50,14 @@ except Exception as _e:
         def select_part(self, *a): pass
         def select_parts(self, *a): pass
         def clear_parts(self): pass
+        def set_thickness_preview(self, *_): pass
+        def set_inner_shell_ratio(self, *_): pass
+        def set_inner_shell_front(self, *_): pass
+        def set_inner_shell_rear(self, *_): pass
+        def set_outer_shell_visible(self, *_): pass
+        def set_inner_shell_visible(self, *_): pass
+        def set_body_stretch(self, *_): pass
+        def set_body_offset(self, *_): pass
 
 try:
     import trimesh as _trimesh
@@ -557,19 +565,18 @@ class MainWindow(QMainWindow):
         # ── 03 Body ───────────────────────────────────────────────────────
         s3 = _Section("03  BODY")
 
-        self._e_wheelbase   = _NumEntry("Target WB",    170.0)
-        self._e_body_width  = _NumEntry("Body Width",   190.0)
-        self._e_body_height = _NumEntry("Body Height",  100.0)
-        self._e_thickness   = _NumEntry("Thickness",      1.5)
-        self._e_cut_z       = _NumEntry("Cut Z",          10.0)
+        self._e_wheelbase      = _NumEntry("Target WB",    170.0)
+        self._e_body_width     = _NumEntry("Body Width",   190.0)
+        self._e_body_height    = _NumEntry("Body Height",  100.0)
+        self._e_thickness      = _NumEntry("Thickness",      1.5)
+        self._e_cut_z          = _NumEntry("Cut Z",         10.0)
 
         for e in (self._e_wheelbase, self._e_body_width, self._e_body_height,
-                  self._e_thickness, self._e_cut_z):
+                  self._e_thickness):
             s3.add(e)
             e.changed.connect(self._on_param_change)
 
         self._btn_cut_z = self._pick_btn("▶ PICK CUT Z", "cut_z")
-        s3.add(self._btn_cut_z)
 
         reset_btn = QPushButton("⟳  パラメータをリセット")
         reset_btn.setProperty("role", "accent2")
@@ -577,6 +584,46 @@ class MainWindow(QMainWindow):
         s3.add(reset_btn)
 
         lay.addWidget(s3)
+
+        # ── 03b Shape / Inner Shell ───────────────────────────────────────
+        s3b = _Section("03b  SHAPE / INNER SHELL")
+
+        # Cut Z
+        self._e_cut_z.changed.connect(self._on_param_change)
+        s3b.add(self._e_cut_z)
+        s3b.add(self._btn_cut_z)
+
+        # 伸縮
+        self._e_stretch_x = _NumEntry("Stretch X %", 100.0)
+        self._e_stretch_y = _NumEntry("Stretch Y %", 100.0)
+        self._e_stretch_z = _NumEntry("Stretch Z %", 100.0)
+        # 平行移動
+        self._e_offset_x  = _NumEntry("Offset X",      0.0)
+        self._e_offset_y2 = _NumEntry("Offset Y",      0.0)
+        self._e_offset_z  = _NumEntry("Offset Z",      0.0)
+        # 内側シェル
+        self._e_inner_ratio = _NumEntry("Inner Shell %", 100.0)
+        self._e_inner_front = _NumEntry("Inner Front %", 100.0)
+        self._e_inner_rear  = _NumEntry("Inner Rear %",  100.0)
+
+        for e in (self._e_stretch_x, self._e_stretch_y, self._e_stretch_z,
+                  self._e_offset_x, self._e_offset_y2, self._e_offset_z,
+                  self._e_inner_ratio, self._e_inner_front, self._e_inner_rear):
+            s3b.add(e)
+            e.changed.connect(self._on_param_change)
+
+        # シェル表示切替チェックボックス
+        self._chk_outer = QCheckBox("外側シェル")
+        self._chk_outer.setChecked(True)
+        self._chk_inner = QCheckBox("内側シェル")
+        self._chk_inner.setChecked(True)
+        self._chk_outer.toggled.connect(
+            lambda v: self._renderer.set_outer_shell_visible(v))
+        self._chk_inner.toggled.connect(
+            lambda v: self._renderer.set_inner_shell_visible(v))
+        s3b.addRow(self._chk_outer, self._chk_inner)
+
+        lay.addWidget(s3b)
 
         # ── 04 Execute ────────────────────────────────────────────────────
         s4 = _Section("04  EXECUTE")
@@ -804,6 +851,8 @@ class MainWindow(QMainWindow):
                     f"X:{info['X_mm']:.0f}  Y:{info['Y_mm']:.0f}  "
                     f"Z:{info['Z_mm']:.0f} mm  ({info['faces']:,} faces)"
                 )
+                if "Y_min_mm" in info:
+                    self._e_cut_z.set(round(info["Y_min_mm"], 1))
                 self._update_viz()
                 self._mark_btn_done(self._open_btn, "✓  モデル読み込み完了")
             else:
@@ -902,6 +951,24 @@ class MainWindow(QMainWindow):
                 sc_front_cy  = sc_front_cy,
                 sc_rear_cy   = sc_rear_cy,
             )
+            # 内側シェルプレビュー: 結果表示中は非表示、通常時は肉厚値・比率を渡す
+            if self._has_result_displayed:
+                self._renderer.set_thickness_preview(None)
+                self._renderer.set_body_stretch(1.0, 1.0, 1.0)
+                self._renderer.set_body_offset(0.0, 0.0, 0.0)
+            else:
+                self._renderer.set_thickness_preview(self._e_thickness.get())
+                self._renderer.set_inner_shell_ratio(self._e_inner_ratio.get() / 100.0)
+                self._renderer.set_inner_shell_front(self._e_inner_front.get() / 100.0)
+                self._renderer.set_inner_shell_rear(self._e_inner_rear.get()  / 100.0)
+                self._renderer.set_body_stretch(
+                    self._e_stretch_x.get() / 100.0,
+                    self._e_stretch_y.get() / 100.0,
+                    self._e_stretch_z.get() / 100.0)
+                self._renderer.set_body_offset(
+                    self._e_offset_x.get(),
+                    self._e_offset_y2.get(),
+                    self._e_offset_z.get())
         except Exception as e:
             print(f"[viz] {e}")
 
@@ -931,6 +998,9 @@ class MainWindow(QMainWindow):
             self._e_front_d, self._e_rear_d,
             self._e_wheelbase, self._e_body_width, self._e_body_height,
             self._e_thickness, self._e_cut_z,
+            self._e_stretch_x, self._e_stretch_y, self._e_stretch_z,
+            self._e_offset_x, self._e_offset_y2, self._e_offset_z,
+            self._e_inner_ratio, self._e_inner_front, self._e_inner_rear,
             self._e_thru_front_d, self._e_thru_rear_d,
         ):
             e.reset()
@@ -1065,9 +1135,20 @@ class MainWindow(QMainWindow):
                 "width_mm":  self._e_body_width.get(),
                 "height_mm": self._e_body_height.get(),
             },
+            "shape": {
+                "stretch_x": self._e_stretch_x.get() / 100.0,
+                "stretch_y": self._e_stretch_y.get() / 100.0,
+                "stretch_z": self._e_stretch_z.get() / 100.0,
+                "offset_x":  self._e_offset_x.get(),
+                "offset_y":  self._e_offset_y2.get(),
+                "offset_z":  self._e_offset_z.get(),
+            },
             "solidify": {
-                "thickness": self._e_thickness.get(),
-                "direction": "inner",
+                "thickness":   self._e_thickness.get(),
+                "direction":   "inner",
+                "inner_ratio": self._e_inner_ratio.get() / 100.0,
+                "inner_front": self._e_inner_front.get() / 100.0,
+                "inner_rear":  self._e_inner_rear.get()  / 100.0,
             },
             "through_cut": {
                 "front_diameter": self._e_thru_front_d.get(),

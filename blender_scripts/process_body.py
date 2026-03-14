@@ -225,6 +225,45 @@ def main():
                 bpy.context.view_layer.objects.active = obj
                 bpy.ops.object.transform_apply(scale=True)
 
+        # ---- 伸縮（stretch）と平行移動（offset）----
+        shape = params.get("shape", {})
+        stretch_x = shape.get("stretch_x", 1.0)
+        stretch_y = shape.get("stretch_y", 1.0)
+        stretch_z = shape.get("stretch_z", 1.0)
+        offset_x  = shape.get("offset_x",  0.0)
+        offset_y  = shape.get("offset_y",  0.0)
+        offset_z  = shape.get("offset_z",  0.0)
+
+        if stretch_x != 1.0 or stretch_y != 1.0 or stretch_z != 1.0:
+            log(f"Stretch: x={stretch_x:.3f}  y={stretch_y:.3f}  z={stretch_z:.3f}")
+            from mathutils import Vector
+            bbox_c = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+            cx = (max(v.x for v in bbox_c) + min(v.x for v in bbox_c)) / 2.0
+            cy = (max(v.y for v in bbox_c) + min(v.y for v in bbox_c)) / 2.0
+            cz = (max(v.z for v in bbox_c) + min(v.z for v in bbox_c)) / 2.0
+            # 重心を原点に移動 → スケール → 戻す
+            obj.location.x -= cx;  obj.location.y -= cy;  obj.location.z -= cz
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.transform_apply(location=True)
+            obj.scale.x *= stretch_x
+            obj.scale.y *= stretch_y
+            obj.scale.z *= stretch_z
+            bpy.ops.object.transform_apply(scale=True)
+            obj.location.x += cx;  obj.location.y += cy;  obj.location.z += cz
+            bpy.ops.object.transform_apply(location=True)
+
+        if offset_x != 0.0 or offset_y != 0.0 or offset_z != 0.0:
+            log(f"Offset: x={offset_x:.1f}  y={offset_y:.1f}  z={offset_z:.1f}")
+            obj.location.x += offset_x
+            obj.location.y += offset_y
+            obj.location.z += offset_z
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.transform_apply(location=True)
+
         # ---- メッシュ修復 ----
         log("Repairing mesh...")
         _repair_mesh(obj)
@@ -260,9 +299,13 @@ def main():
         # ---- 中空化（タイヤカット済みソリッドに対して実施）----
         # タイヤカット後のソリッドを内側縮小コピーとの差分で中空化する。
         # タイヤホール形状が内側シェルにも反映されるため余分な壁が生じない。
-        thickness = solidify_params["thickness"]   # mm
-        log(f"Hollow Boolean: thickness={thickness}mm")
-        _hollow_boolean(obj, thickness)
+        thickness   = solidify_params["thickness"]                # mm
+        inner_ratio = solidify_params.get("inner_ratio", 1.0)   # 0.0–1.0 上部カット
+        inner_front = solidify_params.get("inner_front", 1.0)   # 0.0–1.0 前方カット
+        inner_rear  = solidify_params.get("inner_rear",  1.0)   # 0.0–1.0 後方カット
+        log(f"Hollow Boolean: thickness={thickness}mm  "
+            f"ratio={inner_ratio:.2f}  front={inner_front:.2f}  rear={inner_rear:.2f}")
+        _hollow_boolean(obj, thickness, inner_ratio, inner_front, inner_rear)
 
         # ---- ボディ下部カット ----
         # cut_z_mm は処理前モデルのvispy Y座標（= Blender Y値）。
@@ -377,7 +420,10 @@ def _decimate(obj, ratio: float):
 
 
 
-def _hollow_boolean(obj, thickness: float):
+def _hollow_boolean(obj, thickness: float,
+                    inner_ratio: float = 1.0,
+                    inner_front: float = 1.0,
+                    inner_rear:  float = 1.0):
     """
     スケール済みモデルから「厚さ分だけ縮小した内側コピー」をブーリアン差分して中空化する。
 
@@ -385,16 +431,25 @@ def _hollow_boolean(obj, thickness: float):
     スケールはバウンディングボックス中心まわりに適用するため、
     平坦面の壁厚は thickness mm に正確に一致する。
 
-    タイヤカット・WB/幅/高さスケーリング完了後に呼ぶこと。
+    inner_ratio : 0–1。上部カット比率。1.0=フル中空化、0.5=下50%のみ中空化。
+    inner_front : 0–1。前方カット比率。モデル中心から前方へ何%まで内側シェルを使うか。
+    inner_rear  : 0–1。後方カット比率。モデル中心から後方へ何%まで内側シェルを使うか。
+
+    カットが必要な場合はブーリアン INTERSECT（keep-box との共通部分）を使うため、
+    切断面は自動でキャップされ閉じたソリッドになる。
     """
     from mathutils import Vector
 
-    bbox = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
-    cur_x = max(v.x for v in bbox) - min(v.x for v in bbox)
-    cur_y = max(v.y for v in bbox) - min(v.y for v in bbox)
-    cur_z = max(v.z for v in bbox) - min(v.z for v in bbox)
+    bbox     = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    min_x    = min(v.x for v in bbox);  max_x = max(v.x for v in bbox)
+    min_y    = min(v.y for v in bbox);  max_y = max(v.y for v in bbox)
+    min_z    = min(v.z for v in bbox);  max_z = max(v.z for v in bbox)
+    cur_x    = max_x - min_x
+    cur_y    = max_y - min_y
+    cur_z    = max_z - min_z
+    x_mid    = (min_x + max_x) / 2.0
 
-    min_dim = 4 * thickness   # 寸法が肉厚の4倍未満なら中空化不可
+    min_dim = 4 * thickness
     if cur_x < min_dim or cur_y < min_dim or cur_z < min_dim:
         log(f"Warning: Model too small to hollow "
             f"(x={cur_x:.1f} y={cur_y:.1f} z={cur_z:.1f} / min={min_dim:.1f}mm). Skipping.")
@@ -406,6 +461,7 @@ def _hollow_boolean(obj, thickness: float):
 
     log(f"  outer: x={cur_x:.1f} y={cur_y:.1f} z={cur_z:.1f} mm")
     log(f"  inner scale: sx={sx:.4f} sy={sy:.4f} sz={sz:.4f}")
+    log(f"  inner_ratio={inner_ratio:.2f}  inner_front={inner_front:.2f}  inner_rear={inner_rear:.2f}")
 
     # ── 内側コピーを作成 ──────────────────────────────────────
     bpy.ops.object.select_all(action='DESELECT')
@@ -415,8 +471,6 @@ def _hollow_boolean(obj, thickness: float):
     inner_obj = bpy.context.active_object
     inner_obj.name = "RCBody_Inner"
 
-    # バウンディングボックス中心を原点に移動してからスケール
-    # → 中心まわりに均等縮小（各面の余白 ≈ thickness mm）
     bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
     inner_obj.scale.x *= sx
     inner_obj.scale.y *= sy
@@ -426,6 +480,51 @@ def _hollow_boolean(obj, thickness: float):
     inner_obj.select_set(True)
     bpy.context.view_layer.objects.active = inner_obj
     bpy.ops.object.transform_apply(scale=True)
+
+    # ── カットが必要な場合: keep-box との INTERSECT で閉じたソリッドを維持 ────
+    # INTERSECT は切断面を自動キャップするため、開いたメッシュにならない。
+    inner_ratio = max(0.0, min(1.0, inner_ratio))
+    inner_front = max(0.0, min(1.0, inner_front))
+    inner_rear  = max(0.0, min(1.0, inner_rear))
+
+    needs_cut = (inner_ratio < 1.0 or inner_front < 1.0 or inner_rear < 1.0)
+    if needs_cut:
+        pad = max(cur_x, cur_y, cur_z) * 2.0
+
+        # keep-box の各軸範囲を計算
+        # Y (上下): 底面から inner_ratio × 高さ まで
+        keep_y_lo = min_y - pad
+        keep_y_hi = (min_y + inner_ratio * cur_y) if inner_ratio < 1.0 else (max_y + pad)
+
+        # X (前後): 中心から前方 inner_front × 前半長、後方 inner_rear × 後半長
+        keep_x_hi = (x_mid + inner_front * (max_x - x_mid)) if inner_front < 1.0 else (max_x + pad)
+        keep_x_lo = (x_mid - inner_rear  * (x_mid - min_x)) if inner_rear  < 1.0 else (min_x - pad)
+
+        # Z (左右): カットなし、余裕を持たせる
+        keep_z_lo = min_z - pad
+        keep_z_hi = max_z + pad
+
+        box_cx = (keep_x_lo + keep_x_hi) / 2.0
+        box_cy = (keep_y_lo + keep_y_hi) / 2.0
+        box_cz = (keep_z_lo + keep_z_hi) / 2.0
+        box_sx = keep_x_hi - keep_x_lo
+        box_sy = keep_y_hi - keep_y_lo
+        box_sz = keep_z_hi - keep_z_lo
+
+        log(f"  Keep-box: X=[{keep_x_lo:.1f},{keep_x_hi:.1f}]  "
+            f"Y=[{keep_y_lo:.1f},{keep_y_hi:.1f}]  Z=[{keep_z_lo:.1f},{keep_z_hi:.1f}]")
+
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(box_cx, box_cy, box_cz))
+        keep_box = bpy.context.object
+        keep_box.scale.x = box_sx
+        keep_box.scale.y = box_sy
+        keep_box.scale.z = box_sz
+        bpy.ops.object.select_all(action='DESELECT')
+        keep_box.select_set(True)
+        bpy.context.view_layer.objects.active = keep_box
+        bpy.ops.object.transform_apply(scale=True)
+
+        _boolean_intersect(inner_obj, keep_box)
 
     # ── ブーリアン差分: 外側 − 内側 = 中空シェル ─────────────
     _boolean_subtract(obj, inner_obj)
@@ -471,6 +570,32 @@ def _boolean_subtract(target: bpy.types.Object, cutter: bpy.types.Object):
 
     # カッターを削除
     bpy.data.objects.remove(cutter, do_unlink=True)
+
+
+def _boolean_intersect(target: bpy.types.Object, keep_box: bpy.types.Object):
+    """target と keep_box のブーリアン積（INTERSECT）を target に適用する。
+    INTERSECT はカット断面を自動でキャップするため、閉じたソリッドが得られる。"""
+    bpy.ops.object.select_all(action='DESELECT')
+    target.select_set(True)
+    bpy.context.view_layer.objects.active = target
+
+    mod = target.modifiers.new(name="Bool_Intersect", type='BOOLEAN')
+    mod.operation = 'INTERSECT'
+    mod.object = keep_box
+    try:
+        mod.solver = 'EXACT'
+    except (AttributeError, TypeError):
+        try:
+            mod.solver = 'FAST'
+        except (AttributeError, TypeError):
+            pass
+
+    vert_before = len(target.data.vertices)
+    bpy.ops.object.modifier_apply(modifier="Bool_Intersect")
+    vert_after = len(target.data.vertices)
+    log(f"  Boolean INTERSECT: {vert_before} verts → {vert_after} verts")
+
+    bpy.data.objects.remove(keep_box, do_unlink=True)
 
 
 def _remove_tires(obj, wheels: dict):
