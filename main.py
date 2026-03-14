@@ -241,8 +241,6 @@ class MainWindow(QMainWindow):
         self._active_pick_btn: QPushButton | None = None
         self._front_axle_y: float | None = None   # Y (height) picked for front axle
         self._rear_axle_y:  float | None = None   # Y (height) picked for rear axle
-        self._result_front_x: float | None = None  # スケール後のフロント軸X（結果表示用）
-        self._result_rear_x:  float | None = None  # スケール後のリア軸X（結果表示用）
         self._result_cut_z:   float | None = None  # スケール後のCut Z（結果表示用）
 
         os.makedirs(PREVIEW_DIR, exist_ok=True)
@@ -503,28 +501,16 @@ class MainWindow(QMainWindow):
         # ── 02 Tires ──────────────────────────────────────────────────────
         s2 = _Section("02  TIRES")
 
-        self._e_front_x    = _NumEntry("Front X",     85.0)
-        self._e_rear_x     = _NumEntry("Rear X",      -85.0)
-        self._e_offset_y   = _NumEntry("Y Offset",     45.0)
-        self._e_front_d    = _NumEntry("カット径 前",  52.0)
-        self._e_front_w    = _NumEntry("Front Width",  26.0)
-        self._e_rear_d     = _NumEntry("カット径 後",  52.0)
-        self._e_rear_w     = _NumEntry("Rear Width",   26.0)
-        self._e_rc_front_d = _NumEntry("RC径 前",      52.0)
-        self._e_rc_rear_d  = _NumEntry("RC径 後",      52.0)
+        self._e_front_x  = _NumEntry("Front X",    85.0)
+        self._e_rear_x   = _NumEntry("Rear X",     -85.0)
+        self._e_offset_y = _NumEntry("Y Offset",    45.0)
+        self._e_front_d  = _NumEntry("カット径 前", 52.0)
+        self._e_rear_d   = _NumEntry("カット径 後", 52.0)
 
         for e in (self._e_front_x, self._e_rear_x, self._e_offset_y,
-                  self._e_front_d, self._e_front_w,
-                  self._e_rear_d,  self._e_rear_w,
-                  self._e_rc_front_d, self._e_rc_rear_d):
+                  self._e_front_d, self._e_rear_d):
             s2.add(e)
             e.changed.connect(self._on_param_change)
-
-        # Separator hint
-        _hint2 = QLabel("カット径: Blender Boolean用  /  RC径: 3D表示用")
-        _hint2.setStyleSheet("font-size: 10px; color: #4a5568;")
-        _hint2.setWordWrap(True)
-        s2.add(_hint2)
 
         self._btn_front_x = self._pick_btn("▶ FRONT X", "front_x")
         self._btn_rear_x  = self._pick_btn("▶ REAR X",  "rear_x")
@@ -741,11 +727,9 @@ class MainWindow(QMainWindow):
         self._open_btn.style().polish(self._open_btn)
 
         self._clear_result_btn.setVisible(False)
-        self._front_axle_y   = None
-        self._rear_axle_y    = None
-        self._result_front_x = None
-        self._result_rear_x  = None
-        self._result_cut_z   = None
+        self._front_axle_y = None
+        self._rear_axle_y  = None
+        self._result_cut_z = None
         if self._renderer.available:
             info = self._renderer.load(path)
             if info:
@@ -821,21 +805,15 @@ class MainWindow(QMainWindow):
             return
         try:
             self._renderer.update_viz(
-                front_x    = self._e_front_x.get(),
-                rear_x     = self._e_rear_x.get(),
-                offset_y   = self._e_offset_y.get(),
-                front_r    = self._e_rc_front_d.get() / 2.0,
-                rear_r     = self._e_rc_rear_d.get()  / 2.0,
-                cut_z      = self._e_cut_z.get(),
+                front_x     = self._e_front_x.get(),
+                rear_x      = self._e_rear_x.get(),
+                offset_y    = self._e_offset_y.get(),
                 front_cut_r = self._e_front_d.get() / 2.0,
                 rear_cut_r  = self._e_rear_d.get()  / 2.0,
-                front_cy   = self._front_axle_y,
-                rear_cy    = self._rear_axle_y,
-                front_w    = self._e_front_w.get(),
-                rear_w     = self._e_rear_w.get(),
-                result_front_x = self._result_front_x,
-                result_rear_x  = self._result_rear_x,
-                cut_z_result   = self._result_cut_z,
+                cut_z       = self._e_cut_z.get(),
+                front_cy    = self._front_axle_y,
+                rear_cy     = self._rear_axle_y,
+                cut_z_result = self._result_cut_z,
             )
         except Exception as e:
             print(f"[viz] {e}")
@@ -843,9 +821,7 @@ class MainWindow(QMainWindow):
     def _clear_result_overlay(self):
         self._renderer.clear_result()
         self._clear_result_btn.setVisible(False)
-        self._result_front_x = None
-        self._result_rear_x  = None
-        self._result_cut_z   = None
+        self._result_cut_z = None
         self._update_viz()
 
     def _update_wb_label(self):
@@ -969,9 +945,7 @@ class MainWindow(QMainWindow):
                 "rear_x":         self._e_rear_x.get(),
                 "offset_y":       self._e_offset_y.get(),
                 "front_diameter": self._e_front_d.get(),
-                "front_width":    self._e_front_w.get(),
                 "rear_diameter":  self._e_rear_d.get(),
-                "rear_width":     self._e_rear_w.get(),
                 "front_cy":       self._front_axle_y,   # タイヤ中心Y (mm, Noneなら自動)
                 "rear_cy":        self._rear_axle_y,
             },
@@ -1060,19 +1034,6 @@ class MainWindow(QMainWindow):
         result_stl = os.path.join(PREVIEW_DIR, "result.stl")
         if self._renderer.available and os.path.isfile(result_stl):
             self._renderer.load_result(result_stl)
-            # フルモード時: WBスケール比からRC径の描画座標をスケール後に更新
-            front_x  = self._e_front_x.get()
-            rear_x   = self._e_rear_x.get()
-            target_wb = self._e_wheelbase.get()
-            current_wb = abs(front_x - rear_x)
-            if current_wb > 1.0 and target_wb > 0:
-                wb_ratio = target_wb / current_wb
-                self._result_front_x = front_x * wb_ratio
-                self._result_rear_x  = rear_x  * wb_ratio
-            else:
-                # tire_cut_only など: スケールなし → オリジナル座標のまま
-                self._result_front_x = None
-                self._result_rear_x  = None
             # スケール後のCut Z: cut_z * scale_y（Yスケール適用後の実際のカット位置）
             original_height = self._model_size.get('Y_mm', 0)
             target_height   = self._e_body_height.get()

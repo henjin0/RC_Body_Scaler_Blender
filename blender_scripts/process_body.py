@@ -106,18 +106,6 @@ def main():
             remove_parts = []
 
     if not remove_parts:
-        # ---- タイヤ除去 ----
-        log("Removing tires (boolean subtract)...")
-        _remove_tires(obj, wheels)
-
-        if mode == "tire_cut_only":
-            log("mode=tire_cut_only: スケール・Solidify・底面カットをスキップして出力します")
-            result_stl = os.path.join(preview_dir, "result.stl")
-            _export_main_stl(result_stl, is_blender4)
-            log(f"STL exported (tire_cut_only): {result_stl}")
-            log("Done.")
-            sys.exit(0)
-
         # ---- ホイールベース調整 ----
         # 注意: STLはmm値のままBlenderにインポートされるため、単位変換は不要。
         # Blender内の座標値 = vispy内のmm値（どちらも同一の数値）
@@ -173,12 +161,27 @@ def main():
         _repair_mesh(obj)
 
         # ---- 中空化（内側縮小コピーのブーリアン差分） ----
+        # スケール完了後・タイヤカット前に実施する。
+        # タイヤカット後に中空化するとホイールハウス内側に余分な壁が残るため。
         # Solidifyモディファイアではなく、バウンディングボックス中心まわりに
         # (outer - 2*thickness) / outer でスケールした内側コピーを差し引く。
         # 各軸の壁厚 ≈ thickness mm（平坦面では厳密に一致）。
         thickness = solidify_params["thickness"]   # mm
         log(f"Hollow Boolean: thickness={thickness}mm")
         _hollow_boolean(obj, thickness)
+
+        # ---- タイヤ除去 ----
+        # 中空化後にタイヤカットすることで、ホイールハウス内側の余分な壁を防ぐ。
+        log("Removing tires (boolean subtract)...")
+        _remove_tires(obj, wheels)
+
+        if mode == "tire_cut_only":
+            log("mode=tire_cut_only: スケール後・中空化後のタイヤカット結果を出力します")
+            result_stl = os.path.join(preview_dir, "result.stl")
+            _export_main_stl(result_stl, is_blender4)
+            log(f"STL exported (tire_cut_only): {result_stl}")
+            log("Done.")
+            sys.exit(0)
 
         # ---- ボディ下部カット ----
         # cut_z_mm は処理前モデルのvispy Y座標（= Blender Y値）。
@@ -281,16 +284,6 @@ def _decimate(obj, ratio: float):
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier="Decimate")
 
-
-def _solidify(obj, thickness_m: float, direction: str):
-    """Solidifyモディファイア（現在は未使用 — _hollow_boolean を参照）"""
-    mod = obj.modifiers.new(name="Solidify", type='SOLIDIFY')
-    mod.thickness = thickness_m
-    mod.offset = -1.0 if direction == "inner" else 1.0
-    bpy.ops.object.select_all(action='DESELECT')
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.modifier_apply(modifier="Solidify")
 
 
 def _hollow_boolean(obj, thickness: float):

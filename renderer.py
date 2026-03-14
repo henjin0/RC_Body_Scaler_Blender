@@ -403,11 +403,9 @@ class Renderer3D:
     def update_viz(
         self,
         front_x: float, rear_x: float, offset_y: float,
-        front_r: float, rear_r: float, cut_z: float,
+        cut_z: float,
         front_cut_r: float | None = None, rear_cut_r: float | None = None,
         front_cy: float | None = None, rear_cy: float | None = None,
-        front_w: float = 26.0, rear_w: float = 26.0,
-        result_front_x: float | None = None, result_rear_x: float | None = None,
         cut_z_result: float | None = None,
     ):
         self._clear_helpers()
@@ -422,27 +420,12 @@ class Renderer3D:
         cy_front = front_cy if front_cy is not None else model_y_ctr
         cy_rear  = rear_cy  if rear_cy  is not None else model_y_ctr
 
-        # ── 結果オーバーレイ中: カット径のみ表示（どこをカットしたかの参考）──────
-        # ── 通常時: RC径 + カット径 の両方を表示 ─────────────────────────────────
-
+        # ── カット径シリンダー（常に表示）────────────────────────────────────
         axle_specs = [
-            (front_x, front_r, front_cut_r, cy_front, "#00e5ff", "FRONT"),
-            (rear_x,  rear_r,  rear_cut_r,  cy_rear,  "#ff6b35", "REAR"),
+            (front_x, front_cut_r, cy_front, "#00e5ff", "FRONT"),
+            (rear_x,  rear_cut_r,  cy_rear,  "#ff6b35", "REAR"),
         ]
-        for x, r, cut_r, cy, col, tag in axle_specs:
-
-            if not self._has_result:
-                # 通常時: RC径シリンダー
-                vv, ff = _cylinder_mesh_z(x, cy, model_z_ctr, r, model_z_half)
-                vis = _VMesh(
-                    vertices=vv, faces=ff,
-                    color=_hex_rgba(col, 0.50),
-                    parent=self.view.scene,
-                )
-                vis.set_gl_state("translucent", depth_test=True, cull_face=False)
-                self._helpers.append(vis)
-
-            # カット径シリンダー (常に表示 — 結果時は「ここをカットした」の参考)
+        for x, cut_r, cy, col, tag in axle_specs:
             if cut_r is not None:
                 vvc, ffc = _cylinder_mesh_z(x, cy, model_z_ctr, cut_r, model_z_half)
                 visc = _VMesh(
@@ -455,14 +438,12 @@ class Renderer3D:
 
             # ラベル
             try:
-                lbl_r   = cut_r if cut_r is not None else r
+                lbl_r   = cut_r if cut_r is not None else 26.0
                 lbl_pos = np.array([x, cy + lbl_r + 10, model_z_ctr], dtype=np.float32)
-                if self._has_result:
-                    lbl_txt = f"{tag}  Cut:{cut_r*2:.0f}mm" if cut_r is not None else tag
+                if cut_r is not None:
+                    lbl_txt = f"{tag}  Cut:{cut_r*2:.0f}mm"
                 else:
-                    lbl_txt = f"{tag}  RC:{r*2:.0f}mm"
-                    if cut_r is not None and abs(cut_r - r) > 0.5:
-                        lbl_txt += f"  Cut:{cut_r*2:.0f}mm"
+                    lbl_txt = tag
                 txt = _VText(
                     lbl_txt, pos=lbl_pos,
                     color=_hex_rgba(col, 1.0),
@@ -487,8 +468,10 @@ class Renderer3D:
             mid_x  = (front_x + rear_x) / 2.0
             mid_cy = (cy_front + cy_rear) / 2.0
             wb_mm  = abs(front_x - rear_x)
-            max_r  = max(front_r, rear_r) if not self._has_result else (
-                max(front_cut_r, rear_cut_r) if front_cut_r and rear_cut_r else max(front_r, rear_r))
+            max_r  = max(
+                front_cut_r if front_cut_r is not None else 26.0,
+                rear_cut_r  if rear_cut_r  is not None else 26.0,
+            )
             wb_lbl = _VText(
                 f"WB {wb_mm:.0f}mm",
                 pos=np.array([mid_x, mid_cy + max_r + 10, model_z_ctr], dtype=np.float32),

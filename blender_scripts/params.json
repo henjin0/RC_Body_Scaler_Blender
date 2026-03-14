@@ -7,17 +7,15 @@
     "rz": 0.0
   },
   "wheels": {
-    "front_x": 551.1,
-    "rear_x": -538.0,
+    "front_x": 548.9,
+    "rear_x": -540.8,
     "offset_y": 45.0,
-    "front_diameter": 350.0,
-    "front_width": 26.0,
-    "rear_diameter": 350.0,
-    "rear_width": 26.0,
-    "front_cy": -169.3,
-    "rear_cy": -172.6
+    "front_diameter": 380.0,
+    "rear_diameter": 380.0,
+    "front_cy": -173.9,
+    "rear_cy": -170.9
   },
-  "wheelbase_target": 83.0,
+  "wheelbase_target": 85.0,
   "body_target": {
     "width_mm": 65.0,
     "height_mm": 55.0
@@ -26,7 +24,7 @@
     "thickness": 2.5,
     "direction": "inner"
   },
-  "cut_z": -191.8,
+  "cut_z": -182.1,
   "output_stl": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/result.stl",
   "loose_json": "/Users/minoruinoue/Documents/git/RC_Body_Scaler_Blender/preview/loose_parts.json",
   "remove_parts": []
