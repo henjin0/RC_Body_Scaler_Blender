@@ -106,6 +106,11 @@ def main():
             remove_parts = []
 
     if not remove_parts:
+        # 各軸の適用スケール係数を記録（ホイールアーチ追加カットの座標補正に使用）
+        applied_scale_x = 1.0
+        applied_scale_y = 1.0
+        applied_scale_z = 1.0
+
         # ---- ホイールベース調整 ----
         # 注意: STLはmm値のままBlenderにインポートされるため、単位変換は不要。
         # Blender内の座標値 = vispy内のmm値（どちらも同一の数値）
@@ -114,6 +119,7 @@ def main():
         current_wb = front_x - rear_x
         if current_wb > 0:
             scale_x = wb_target / current_wb
+            applied_scale_x = scale_x
             log(f"Scaling X: {scale_x:.4f} (WB: {current_wb:.1f}mm -> {wb_target:.1f}mm)")
             obj.scale.x *= scale_x
             bpy.ops.object.select_all(action='DESELECT')
@@ -126,10 +132,6 @@ def main():
         target_width_mm  = body_target.get("width_mm",  0)
         target_height_mm = body_target.get("height_mm", 0)
 
-        # Cut Z は処理前モデル基準でピックされる。
-        # Yスケール適用後は座標が変わるので、スケール係数を記録して補正する。
-        applied_scale_y = 1.0
-
         if target_width_mm > 0 or target_height_mm > 0:
             from mathutils import Vector
             bbox_corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
@@ -139,6 +141,7 @@ def main():
 
             if target_width_mm > 0 and cur_width > 1e-3:
                 scale_z = target_width_mm / cur_width
+                applied_scale_z = scale_z
                 log(f"Scaling Z (width): {scale_z:.4f}  ({cur_width:.1f} -> {target_width_mm:.1f} mm)")
                 obj.scale.z *= scale_z
                 bpy.ops.object.select_all(action='DESELECT')
@@ -190,6 +193,31 @@ def main():
         log(f"Cutting bottom at Y={cut_y:.1f}mm "
             f"(picked={cut_z_mm:.1f}mm × scale_y={applied_scale_y:.4f})...")
         _cut_bottom(obj, cut_y)
+
+        # ---- ホイールアーチ追加カット（オプション）----
+        # スケール済み座標でタイヤ円柱を再カットする。
+        # 中空化＋タイヤカット後に整形が不十分なアーチ開口部を仕上げる用途。
+        # front_diameter / rear_diameter が 0 の場合はスキップ。
+        wheel_arch = params.get("wheel_arch_cut", {})
+        front_arch_d = wheel_arch.get("front_diameter", 0)
+        rear_arch_d  = wheel_arch.get("rear_diameter",  0)
+        if front_arch_d > 0 or rear_arch_d > 0:
+            log(f"Wheel arch additional cut: front={front_arch_d}mm  rear={rear_arch_d}mm")
+            arch_wheels = {
+                "front_x":        wheels["front_x"] * applied_scale_x,
+                "rear_x":         wheels["rear_x"]  * applied_scale_x,
+                "offset_y":       wheels["offset_y"] * applied_scale_z,
+                "front_diameter": front_arch_d if front_arch_d > 0 else wheels["front_diameter"],
+                "rear_diameter":  rear_arch_d  if rear_arch_d  > 0 else wheels["rear_diameter"],
+                "front_cy": (wheels["front_cy"] * applied_scale_y
+                             if wheels.get("front_cy") is not None else None),
+                "rear_cy":  (wheels["rear_cy"]  * applied_scale_y
+                             if wheels.get("rear_cy")  is not None else None),
+            }
+            log(f"  Scaled positions: front_x={arch_wheels['front_x']:.1f}"
+                f"  rear_x={arch_wheels['rear_x']:.1f}"
+                f"  offset_y={arch_wheels['offset_y']:.1f}")
+            _remove_tires(obj, arch_wheels)
 
         # ---- 中間ファイル保存 ----
         intermediate_path = os.path.join(preview_dir, "intermediate.blend")

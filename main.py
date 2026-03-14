@@ -38,6 +38,7 @@ except Exception as _e:
         def load(self, *a, **kw): return {}
         def load_result(self, *a, **kw): return {}
         def clear_result(self, *a): pass
+        def hide_for_processing(self): pass
         def set_mode(self, *a): pass
         def set_bgcolor(self, *a): pass
         def update_viz(self, *a, **kw): pass
@@ -506,11 +507,19 @@ class MainWindow(QMainWindow):
         self._e_offset_y = _NumEntry("Y Offset",    45.0)
         self._e_front_d  = _NumEntry("カット径 前", 52.0)
         self._e_rear_d   = _NumEntry("カット径 後", 52.0)
+        self._e_arch_front_d = _NumEntry("アーチ径 前",  0.0)
+        self._e_arch_rear_d  = _NumEntry("アーチ径 後",  0.0)
 
         for e in (self._e_front_x, self._e_rear_x, self._e_offset_y,
-                  self._e_front_d, self._e_rear_d):
+                  self._e_front_d, self._e_rear_d,
+                  self._e_arch_front_d, self._e_arch_rear_d):
             s2.add(e)
             e.changed.connect(self._on_param_change)
+
+        _arch_hint = QLabel("アーチ径: スケール後座標でホイールアーチを追加カット\n0 = スキップ")
+        _arch_hint.setStyleSheet("font-size: 10px; color: #4a5568;")
+        _arch_hint.setWordWrap(True)
+        s2.add(_arch_hint)
 
         self._btn_front_x = self._pick_btn("▶ FRONT X", "front_x")
         self._btn_rear_x  = self._pick_btn("▶ REAR X",  "rear_x")
@@ -805,14 +814,16 @@ class MainWindow(QMainWindow):
             return
         try:
             self._renderer.update_viz(
-                front_x     = self._e_front_x.get(),
-                rear_x      = self._e_rear_x.get(),
-                offset_y    = self._e_offset_y.get(),
-                front_cut_r = self._e_front_d.get() / 2.0,
-                rear_cut_r  = self._e_rear_d.get()  / 2.0,
-                cut_z       = self._e_cut_z.get(),
-                front_cy    = self._front_axle_y,
-                rear_cy     = self._rear_axle_y,
+                front_x      = self._e_front_x.get(),
+                rear_x       = self._e_rear_x.get(),
+                offset_y     = self._e_offset_y.get(),
+                front_cut_r  = self._e_front_d.get() / 2.0,
+                rear_cut_r   = self._e_rear_d.get()  / 2.0,
+                arch_front_r = self._e_arch_front_d.get() / 2.0 or None,
+                arch_rear_r  = self._e_arch_rear_d.get()  / 2.0 or None,
+                cut_z        = self._e_cut_z.get(),
+                front_cy     = self._front_axle_y,
+                rear_cy      = self._rear_axle_y,
                 cut_z_result = self._result_cut_z,
             )
         except Exception as e:
@@ -958,6 +969,10 @@ class MainWindow(QMainWindow):
                 "thickness": self._e_thickness.get(),
                 "direction": "inner",
             },
+            "wheel_arch_cut": {
+                "front_diameter": self._e_arch_front_d.get(),
+                "rear_diameter":  self._e_arch_rear_d.get(),
+            },
             "cut_z":        self._e_cut_z.get(),
             "output_stl":   os.path.join(PREVIEW_DIR, "result.stl"),
             "loose_json":   os.path.join(PREVIEW_DIR, "loose_parts.json"),
@@ -971,6 +986,8 @@ class MainWindow(QMainWindow):
         self._processing = True
         self._run_btn.setEnabled(False)
         self._test_tire_btn.setEnabled(False)
+        self._clear_result_btn.setVisible(False)
+        self._renderer.hide_for_processing()   # 元モデル・結果モデルを非表示
         if mode == "tire_cut_only":
             self._run_btn.setText("処理中…")
             self._status_lbl.setText("⏳ タイヤカット処理中…")
@@ -1004,6 +1021,7 @@ class MainWindow(QMainWindow):
         self._progress.setVisible(False)
 
         if code != 0:
+            self._renderer.clear_result()   # エラー時は元モデルを再表示
             self._status_lbl.setStyleSheet("font-size: 12px; color: #ff6b35;")
             self._status_lbl.setText(f"❌ エラーが発生しました (code {code})")
             QMessageBox.critical(

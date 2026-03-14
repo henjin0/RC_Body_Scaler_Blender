@@ -321,6 +321,16 @@ class Renderer3D:
         self._result_faces = None
         self._refresh_mesh()
 
+    def hide_for_processing(self):
+        """処理開始時に全メッシュを非表示にする。
+        _has_result=True かつ _result_verts=None にすることで
+        元モデルも結果モデルも描画されない状態にする。
+        """
+        self._has_result   = True
+        self._result_verts = None
+        self._result_faces = None
+        self._refresh_mesh()
+
     # ── rotation ──────────────────────────────────────────────────────────
 
     def apply_rotation(self, rx_deg: float, ry_deg: float, rz_deg: float):
@@ -405,6 +415,7 @@ class Renderer3D:
         front_x: float, rear_x: float, offset_y: float,
         cut_z: float,
         front_cut_r: float | None = None, rear_cut_r: float | None = None,
+        arch_front_r: float | None = None, arch_rear_r: float | None = None,
         front_cy: float | None = None, rear_cy: float | None = None,
         cut_z_result: float | None = None,
     ):
@@ -420,12 +431,13 @@ class Renderer3D:
         cy_front = front_cy if front_cy is not None else model_y_ctr
         cy_rear  = rear_cy  if rear_cy  is not None else model_y_ctr
 
-        # ── カット径シリンダー（常に表示）────────────────────────────────────
+        # ── カット径シリンダー（常に表示）＆ アーチカット径（指定時に表示）────────
         axle_specs = [
-            (front_x, front_cut_r, cy_front, "#00e5ff", "FRONT"),
-            (rear_x,  rear_cut_r,  cy_rear,  "#ff6b35", "REAR"),
+            (front_x, front_cut_r, arch_front_r, cy_front, "#00e5ff", "FRONT"),
+            (rear_x,  rear_cut_r,  arch_rear_r,  cy_rear,  "#ff6b35", "REAR"),
         ]
-        for x, cut_r, cy, col, tag in axle_specs:
+        for x, cut_r, arch_r, cy, col, tag in axle_specs:
+            # カット径（黄色）
             if cut_r is not None:
                 vvc, ffc = _cylinder_mesh_z(x, cy, model_z_ctr, cut_r, model_z_half)
                 visc = _VMesh(
@@ -436,14 +448,27 @@ class Renderer3D:
                 visc.set_gl_state("translucent", depth_test=True, cull_face=False)
                 self._helpers.append(visc)
 
+            # アーチカット径（緑）— 0より大きい場合のみ
+            if arch_r is not None and arch_r > 0:
+                vva, ffa = _cylinder_mesh_z(x, cy, model_z_ctr, arch_r, model_z_half)
+                visa = _VMesh(
+                    vertices=vva, faces=ffa,
+                    color=(0.2, 1.0, 0.45, 0.28),
+                    parent=self.view.scene,
+                )
+                visa.set_gl_state("translucent", depth_test=True, cull_face=False)
+                self._helpers.append(visa)
+
             # ラベル
             try:
-                lbl_r   = cut_r if cut_r is not None else 26.0
+                lbl_r   = arch_r if (arch_r is not None and arch_r > 0) else (
+                          cut_r  if cut_r  is not None else 26.0)
                 lbl_pos = np.array([x, cy + lbl_r + 10, model_z_ctr], dtype=np.float32)
+                lbl_txt = tag
                 if cut_r is not None:
-                    lbl_txt = f"{tag}  Cut:{cut_r*2:.0f}mm"
-                else:
-                    lbl_txt = tag
+                    lbl_txt += f"  Cut:{cut_r*2:.0f}mm"
+                if arch_r is not None and arch_r > 0:
+                    lbl_txt += f"  Arch:{arch_r*2:.0f}mm"
                 txt = _VText(
                     lbl_txt, pos=lbl_pos,
                     color=_hex_rgba(col, 1.0),
