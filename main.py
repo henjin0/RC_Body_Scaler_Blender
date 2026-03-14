@@ -243,6 +243,8 @@ class MainWindow(QMainWindow):
         self._front_axle_y: float | None = None   # Y (height) picked for front axle
         self._rear_axle_y:  float | None = None   # Y (height) picked for rear axle
         self._result_cut_z:   float | None = None  # スケール後のCut Z（結果表示用）
+        self._scale_info: dict = {}                # フルパイプライン後のスケール情報
+        self._has_result_displayed: bool = False   # 結果モデル表示中フラグ
 
         os.makedirs(PREVIEW_DIR, exist_ok=True)
         os.makedirs(OUTPUTS_DIR, exist_ok=True)
@@ -507,19 +509,19 @@ class MainWindow(QMainWindow):
         self._e_offset_y = _NumEntry("Y Offset",    45.0)
         self._e_front_d  = _NumEntry("カット径 前", 52.0)
         self._e_rear_d   = _NumEntry("カット径 後", 52.0)
-        self._e_arch_front_d = _NumEntry("アーチ径 前",  0.0)
-        self._e_arch_rear_d  = _NumEntry("アーチ径 後",  0.0)
+        self._e_thru_front_d = _NumEntry("貫通径 前",  0.0)
+        self._e_thru_rear_d  = _NumEntry("貫通径 後",  0.0)
 
         for e in (self._e_front_x, self._e_rear_x, self._e_offset_y,
                   self._e_front_d, self._e_rear_d,
-                  self._e_arch_front_d, self._e_arch_rear_d):
+                  self._e_thru_front_d, self._e_thru_rear_d):
             s2.add(e)
             e.changed.connect(self._on_param_change)
 
-        _arch_hint = QLabel("アーチ径: スケール後座標でホイールアーチを追加カット\n0 = スキップ")
-        _arch_hint.setStyleSheet("font-size: 10px; color: #4a5568;")
-        _arch_hint.setWordWrap(True)
-        s2.add(_arch_hint)
+        _thru_hint = QLabel("貫通径: 04実行後にスケール済み座標で円柱貫通カット\n0 = スキップ")
+        _thru_hint.setStyleSheet("font-size: 10px; color: #4a5568;")
+        _thru_hint.setWordWrap(True)
+        s2.add(_thru_hint)
 
         self._btn_front_x = self._pick_btn("▶ FRONT X", "front_x")
         self._btn_rear_x  = self._pick_btn("▶ REAR X",  "rear_x")
@@ -566,6 +568,14 @@ class MainWindow(QMainWindow):
         self._test_tire_btn.setProperty("role", "accent")
         self._test_tire_btn.clicked.connect(lambda: self._run_process(mode="tire_cut_only"))
         s4.add(self._test_tire_btn)
+
+        self._thru_btn = QPushButton("⚡  貫通カット 実行")
+        self._thru_btn.setProperty("role", "accent2")
+        self._thru_btn.setFixedHeight(40)
+        self._thru_btn.setEnabled(False)
+        self._thru_btn.setToolTip("04 実行後に有効になります。スケール済み座標で貫通カットを適用します。")
+        self._thru_btn.clicked.connect(lambda: self._run_process(mode="through_cut"))
+        s4.add(self._thru_btn)
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)
@@ -813,18 +823,37 @@ class MainWindow(QMainWindow):
         if not self._renderer.available:
             return
         try:
+            # 結果モデル表示中はスケール済み座標を計算して渡す
+            sc_front_x = sc_rear_x = sc_offset_y = sc_front_cy = sc_rear_cy = None
+            if self._has_result_displayed and self._scale_info:
+                sx = self._scale_info.get("scale_x", 1.0)
+                sy = self._scale_info.get("scale_y", 1.0)
+                sz = self._scale_info.get("scale_z", 1.0)
+                sc_front_x  = self._e_front_x.get()  * sx
+                sc_rear_x   = self._e_rear_x.get()   * sx
+                sc_offset_y = self._e_offset_y.get() * sz
+                sc_front_cy = (self._front_axle_y * sy
+                               if self._front_axle_y is not None else None)
+                sc_rear_cy  = (self._rear_axle_y  * sy
+                               if self._rear_axle_y  is not None else None)
+
             self._renderer.update_viz(
                 front_x      = self._e_front_x.get(),
                 rear_x       = self._e_rear_x.get(),
                 offset_y     = self._e_offset_y.get(),
                 front_cut_r  = self._e_front_d.get() / 2.0,
                 rear_cut_r   = self._e_rear_d.get()  / 2.0,
-                arch_front_r = self._e_arch_front_d.get() / 2.0 or None,
-                arch_rear_r  = self._e_arch_rear_d.get()  / 2.0 or None,
+                thru_front_r = self._e_thru_front_d.get() / 2.0 or None,
+                thru_rear_r  = self._e_thru_rear_d.get()  / 2.0 or None,
                 cut_z        = self._e_cut_z.get(),
                 front_cy     = self._front_axle_y,
                 rear_cy      = self._rear_axle_y,
                 cut_z_result = self._result_cut_z,
+                sc_front_x   = sc_front_x,
+                sc_rear_x    = sc_rear_x,
+                sc_offset_y  = sc_offset_y,
+                sc_front_cy  = sc_front_cy,
+                sc_rear_cy   = sc_rear_cy,
             )
         except Exception as e:
             print(f"[viz] {e}")
@@ -833,6 +862,8 @@ class MainWindow(QMainWindow):
         self._renderer.clear_result()
         self._clear_result_btn.setVisible(False)
         self._result_cut_z = None
+        self._has_result_displayed = False
+        self._thru_btn.setEnabled(False)
         self._update_viz()
 
     def _update_wb_label(self):
@@ -969,13 +1000,14 @@ class MainWindow(QMainWindow):
                 "thickness": self._e_thickness.get(),
                 "direction": "inner",
             },
-            "wheel_arch_cut": {
-                "front_diameter": self._e_arch_front_d.get(),
-                "rear_diameter":  self._e_arch_rear_d.get(),
+            "through_cut": {
+                "front_diameter": self._e_thru_front_d.get(),
+                "rear_diameter":  self._e_thru_rear_d.get(),
             },
             "cut_z":        self._e_cut_z.get(),
             "output_stl":   os.path.join(PREVIEW_DIR, "result.stl"),
             "loose_json":   os.path.join(PREVIEW_DIR, "loose_parts.json"),
+            "preview_dir":  PREVIEW_DIR,
             "remove_parts": [],
         }
 
@@ -986,11 +1018,15 @@ class MainWindow(QMainWindow):
         self._processing = True
         self._run_btn.setEnabled(False)
         self._test_tire_btn.setEnabled(False)
+        self._thru_btn.setEnabled(False)
         self._clear_result_btn.setVisible(False)
         self._renderer.hide_for_processing()   # 元モデル・結果モデルを非表示
         if mode == "tire_cut_only":
             self._run_btn.setText("処理中…")
             self._status_lbl.setText("⏳ タイヤカット処理中…")
+        elif mode == "through_cut":
+            self._thru_btn.setText("処理中…")
+            self._status_lbl.setText("⏳ 貫通カット処理中…")
         else:
             self._run_btn.setText("処理中…")
             self._status_lbl.setText("⏳ 処理中です。しばらくお待ちください…")
@@ -1018,10 +1054,12 @@ class MainWindow(QMainWindow):
         self._run_btn.setEnabled(True)
         self._run_btn.setText("▶  Blender で処理を実行")
         self._test_tire_btn.setEnabled(True)
+        self._thru_btn.setText("⚡  貫通カット 実行")
         self._progress.setVisible(False)
 
         if code != 0:
             self._renderer.clear_result()   # エラー時は元モデルを再表示
+            self._has_result_displayed = False
             self._status_lbl.setStyleSheet("font-size: 12px; color: #ff6b35;")
             self._status_lbl.setText(f"❌ エラーが発生しました (code {code})")
             QMessageBox.critical(
@@ -1032,6 +1070,18 @@ class MainWindow(QMainWindow):
 
         self._status_lbl.setStyleSheet("font-size: 12px; color: #39d353;")
         self._status_lbl.setText("✅ 処理が完了しました！")
+
+        # スケール情報を読み込み（フルパイプライン時のみ保存される）
+        scale_info_path   = os.path.join(PREVIEW_DIR, "scale_info.json")
+        intermediate_path = os.path.join(PREVIEW_DIR, "intermediate.blend")
+        if os.path.isfile(scale_info_path):
+            try:
+                with open(scale_info_path) as f:
+                    self._scale_info = json.load(f)
+            except Exception:
+                self._scale_info = {}
+        # 貫通カットボタンは intermediate.blend が存在する場合のみ有効化
+        self._thru_btn.setEnabled(os.path.isfile(intermediate_path))
 
         loose_json = os.path.join(PREVIEW_DIR, "loose_parts.json")
         self._loose_parts = []
@@ -1052,6 +1102,7 @@ class MainWindow(QMainWindow):
         result_stl = os.path.join(PREVIEW_DIR, "result.stl")
         if self._renderer.available and os.path.isfile(result_stl):
             self._renderer.load_result(result_stl)
+            self._has_result_displayed = True
             # スケール後のCut Z: cut_z * scale_y（Yスケール適用後の実際のカット位置）
             original_height = self._model_size.get('Y_mm', 0)
             target_height   = self._e_body_height.get()

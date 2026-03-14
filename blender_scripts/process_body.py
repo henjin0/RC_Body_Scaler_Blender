@@ -57,6 +57,61 @@ def main():
     log(f"Blender version: {blender_ver[0]}.{blender_ver[1]}.{blender_ver[2]}")
     is_blender4 = blender_ver[0] >= 4
 
+    # ---- 貫通カットモード ----
+    # スケール＋カット済みの intermediate.blend に円柱ブーリアンを追加適用する。
+    # フルパイプライン完了後に独立して実行できる。
+    if mode == "through_cut":
+        intermediate_path = os.path.join(preview_dir, "intermediate.blend")
+        scale_info_path   = os.path.join(preview_dir, "scale_info.json")
+        output_stl        = params.get("output_stl", os.path.join(preview_dir, "result.stl"))
+
+        if not os.path.exists(intermediate_path):
+            print("ERROR: intermediate.blend not found. Run full pipeline first.", file=sys.stderr)
+            sys.exit(1)
+
+        _clear_scene()
+        bpy.ops.wm.open_mainfile(filepath=intermediate_path)
+        obj = _get_main_object()
+        if obj is None:
+            print("ERROR: No mesh in intermediate.blend", file=sys.stderr)
+            sys.exit(1)
+
+        # スケール情報を読み込み（フルパイプライン時に保存したもの）
+        applied_scale_x = applied_scale_y = applied_scale_z = 1.0
+        if os.path.exists(scale_info_path):
+            with open(scale_info_path) as _sf:
+                _si = json.load(_sf)
+            applied_scale_x = _si.get("scale_x", 1.0)
+            applied_scale_y = _si.get("scale_y", 1.0)
+            applied_scale_z = _si.get("scale_z", 1.0)
+            log(f"Scale info: x={applied_scale_x:.4f} y={applied_scale_y:.4f} z={applied_scale_z:.4f}")
+
+        through_cut = params.get("through_cut", {})
+        front_d = through_cut.get("front_diameter", 0)
+        rear_d  = through_cut.get("rear_diameter",  0)
+
+        if front_d > 0 or rear_d > 0:
+            log(f"Through-cut: front={front_d}mm  rear={rear_d}mm")
+            thru_wheels = {
+                "front_x":        wheels["front_x"]  * applied_scale_x,
+                "rear_x":         wheels["rear_x"]   * applied_scale_x,
+                "offset_y":       wheels["offset_y"] * applied_scale_z,
+                "front_diameter": front_d,
+                "rear_diameter":  rear_d,
+                "front_cy": (wheels["front_cy"] * applied_scale_y
+                             if wheels.get("front_cy") is not None else None),
+                "rear_cy":  (wheels["rear_cy"]  * applied_scale_y
+                             if wheels.get("rear_cy")  is not None else None),
+            }
+            _remove_tires(obj, thru_wheels)
+        else:
+            log("Through-cut: no diameters specified, exporting as-is.")
+
+        _export_main_stl(output_stl, is_blender4)
+        log(f"STL exported (through_cut): {output_stl}")
+        log("Done.")
+        sys.exit(0)
+
     # ---- シーンをクリア ----
     _clear_scene()
 
@@ -194,30 +249,15 @@ def main():
             f"(picked={cut_z_mm:.1f}mm × scale_y={applied_scale_y:.4f})...")
         _cut_bottom(obj, cut_y)
 
-        # ---- ホイールアーチ追加カット（オプション）----
-        # スケール済み座標でタイヤ円柱を再カットする。
-        # 中空化＋タイヤカット後に整形が不十分なアーチ開口部を仕上げる用途。
-        # front_diameter / rear_diameter が 0 の場合はスキップ。
-        wheel_arch = params.get("wheel_arch_cut", {})
-        front_arch_d = wheel_arch.get("front_diameter", 0)
-        rear_arch_d  = wheel_arch.get("rear_diameter",  0)
-        if front_arch_d > 0 or rear_arch_d > 0:
-            log(f"Wheel arch additional cut: front={front_arch_d}mm  rear={rear_arch_d}mm")
-            arch_wheels = {
-                "front_x":        wheels["front_x"] * applied_scale_x,
-                "rear_x":         wheels["rear_x"]  * applied_scale_x,
-                "offset_y":       wheels["offset_y"] * applied_scale_z,
-                "front_diameter": front_arch_d if front_arch_d > 0 else wheels["front_diameter"],
-                "rear_diameter":  rear_arch_d  if rear_arch_d  > 0 else wheels["rear_diameter"],
-                "front_cy": (wheels["front_cy"] * applied_scale_y
-                             if wheels.get("front_cy") is not None else None),
-                "rear_cy":  (wheels["rear_cy"]  * applied_scale_y
-                             if wheels.get("rear_cy")  is not None else None),
-            }
-            log(f"  Scaled positions: front_x={arch_wheels['front_x']:.1f}"
-                f"  rear_x={arch_wheels['rear_x']:.1f}"
-                f"  offset_y={arch_wheels['offset_y']:.1f}")
-            _remove_tires(obj, arch_wheels)
+        # ---- スケール情報保存（貫通カットモードで使用）----
+        scale_info_path = os.path.join(preview_dir, "scale_info.json")
+        with open(scale_info_path, "w", encoding="utf-8") as _sf:
+            json.dump({
+                "scale_x": applied_scale_x,
+                "scale_y": applied_scale_y,
+                "scale_z": applied_scale_z,
+            }, _sf, indent=2)
+        log(f"Scale info saved: x={applied_scale_x:.4f} y={applied_scale_y:.4f} z={applied_scale_z:.4f}")
 
         # ---- 中間ファイル保存 ----
         intermediate_path = os.path.join(preview_dir, "intermediate.blend")

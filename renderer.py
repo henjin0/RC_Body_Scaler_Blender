@@ -415,30 +415,53 @@ class Renderer3D:
         front_x: float, rear_x: float, offset_y: float,
         cut_z: float,
         front_cut_r: float | None = None, rear_cut_r: float | None = None,
-        arch_front_r: float | None = None, arch_rear_r: float | None = None,
+        thru_front_r: float | None = None, thru_rear_r: float | None = None,
         front_cy: float | None = None, rear_cy: float | None = None,
         cut_z_result: float | None = None,
+        # スケール後の座標（結果モデル表示時に貫通カット円柱の位置に使用）
+        sc_front_x: float | None = None, sc_rear_x: float | None = None,
+        sc_offset_y: float | None = None,
+        sc_front_cy: float | None = None, sc_rear_cy: float | None = None,
     ):
         self._clear_helpers()
         if not self.canvas or self._verts is None:
             return
 
         v = self._verts
-        model_y_ctr  = float((v[:, 1].max() + v[:, 1].min()) / 2.0)
-        model_z_ctr  = float(v[:, 2].mean())
-        model_z_half = float(v[:, 2].max() - v[:, 2].min()) / 2.0 * 1.05
+        # 結果モデル表示中は result_verts を空間参照に使う
+        ref_v = (self._result_verts
+                 if (self._has_result and self._result_verts is not None) else v)
 
-        cy_front = front_cy if front_cy is not None else model_y_ctr
-        cy_rear  = rear_cy  if rear_cy  is not None else model_y_ctr
+        model_y_ctr  = float((ref_v[:, 1].max() + ref_v[:, 1].min()) / 2.0)
+        model_z_ctr  = float(ref_v[:, 2].mean())
+        model_z_half = float(ref_v[:, 2].max() - ref_v[:, 2].min()) / 2.0 * 1.05
 
-        # ── カット径シリンダー（常に表示）＆ アーチカット径（指定時に表示）────────
+        # 結果モデル表示中はスケール後座標を使用（提供されていれば）
+        result_shown = self._has_result and self._result_verts is not None
+        if result_shown and sc_front_x is not None:
+            disp_front_x = sc_front_x
+            disp_rear_x  = sc_rear_x  if sc_rear_x  is not None else rear_x
+            disp_offset_y = sc_offset_y if sc_offset_y is not None else offset_y
+        else:
+            disp_front_x  = front_x
+            disp_rear_x   = rear_x
+            disp_offset_y = offset_y
+
+        cy_front = (sc_front_cy if (result_shown and sc_front_cy is not None)
+                    else (front_cy if front_cy is not None else model_y_ctr))
+        cy_rear  = (sc_rear_cy  if (result_shown and sc_rear_cy  is not None)
+                    else (rear_cy  if rear_cy  is not None else model_y_ctr))
+
+        # ── シリンダー表示 ────────────────────────────────────────────────
+        # 結果モデル表示中: カット径（黄）は非表示、貫通カット径（緑）のみ表示
+        # 通常時: カット径（黄）＋貫通カット径（緑）
         axle_specs = [
-            (front_x, front_cut_r, arch_front_r, cy_front, "#00e5ff", "FRONT"),
-            (rear_x,  rear_cut_r,  arch_rear_r,  cy_rear,  "#ff6b35", "REAR"),
+            (disp_front_x, front_cut_r, thru_front_r, cy_front, "#00e5ff", "FRONT"),
+            (disp_rear_x,  rear_cut_r,  thru_rear_r,  cy_rear,  "#ff6b35", "REAR"),
         ]
-        for x, cut_r, arch_r, cy, col, tag in axle_specs:
-            # カット径（黄色）
-            if cut_r is not None:
+        for x, cut_r, thru_r, cy, col, tag in axle_specs:
+            # カット径（黄色）— 結果表示中は非表示
+            if cut_r is not None and not result_shown:
                 vvc, ffc = _cylinder_mesh_z(x, cy, model_z_ctr, cut_r, model_z_half)
                 visc = _VMesh(
                     vertices=vvc, faces=ffc,
@@ -448,9 +471,9 @@ class Renderer3D:
                 visc.set_gl_state("translucent", depth_test=True, cull_face=False)
                 self._helpers.append(visc)
 
-            # アーチカット径（緑）— 0より大きい場合のみ
-            if arch_r is not None and arch_r > 0:
-                vva, ffa = _cylinder_mesh_z(x, cy, model_z_ctr, arch_r, model_z_half)
+            # 貫通カット径（緑）— 0より大きい場合のみ
+            if thru_r is not None and thru_r > 0:
+                vva, ffa = _cylinder_mesh_z(x, cy, model_z_ctr, thru_r, model_z_half)
                 visa = _VMesh(
                     vertices=vva, faces=ffa,
                     color=(0.2, 1.0, 0.45, 0.28),
@@ -461,14 +484,14 @@ class Renderer3D:
 
             # ラベル
             try:
-                lbl_r   = arch_r if (arch_r is not None and arch_r > 0) else (
+                lbl_r   = thru_r if (thru_r is not None and thru_r > 0) else (
                           cut_r  if cut_r  is not None else 26.0)
                 lbl_pos = np.array([x, cy + lbl_r + 10, model_z_ctr], dtype=np.float32)
                 lbl_txt = tag
-                if cut_r is not None:
+                if cut_r is not None and not result_shown:
                     lbl_txt += f"  Cut:{cut_r*2:.0f}mm"
-                if arch_r is not None and arch_r > 0:
-                    lbl_txt += f"  Arch:{arch_r*2:.0f}mm"
+                if thru_r is not None and thru_r > 0:
+                    lbl_txt += f"  貫通:{thru_r*2:.0f}mm"
                 txt = _VText(
                     lbl_txt, pos=lbl_pos,
                     color=_hex_rgba(col, 1.0),
@@ -482,17 +505,17 @@ class Renderer3D:
         # ホイールベースライン
         try:
             wb_line = _VLine(
-                pos=np.array([[front_x, cy_front, model_z_ctr],
-                              [rear_x,  cy_rear,  model_z_ctr]],
+                pos=np.array([[disp_front_x, cy_front, model_z_ctr],
+                              [disp_rear_x,  cy_rear,  model_z_ctr]],
                              dtype=np.float32),
                 color=(1.0, 1.0, 1.0, 0.7), width=2,
                 parent=self.view.scene,
             )
             self._helpers.append(wb_line)
 
-            mid_x  = (front_x + rear_x) / 2.0
+            mid_x  = (disp_front_x + disp_rear_x) / 2.0
             mid_cy = (cy_front + cy_rear) / 2.0
-            wb_mm  = abs(front_x - rear_x)
+            wb_mm  = abs(disp_front_x - disp_rear_x)
             max_r  = max(
                 front_cut_r if front_cut_r is not None else 26.0,
                 rear_cut_r  if rear_cut_r  is not None else 26.0,
@@ -505,11 +528,11 @@ class Renderer3D:
             )
             self._helpers.append(wb_lbl)
 
-            if not self._has_result:
-                for side_z in (model_z_ctr + offset_y, model_z_ctr - offset_y):
+            if not result_shown:
+                for side_z in (model_z_ctr + disp_offset_y, model_z_ctr - disp_offset_y):
                     track_line = _VLine(
-                        pos=np.array([[front_x, cy_front, side_z],
-                                      [rear_x,  cy_rear,  side_z]], dtype=np.float32),
+                        pos=np.array([[disp_front_x, cy_front, side_z],
+                                      [disp_rear_x,  cy_rear,  side_z]], dtype=np.float32),
                         color=(0.6, 0.6, 0.6, 0.4), width=1,
                         parent=self.view.scene,
                     )
